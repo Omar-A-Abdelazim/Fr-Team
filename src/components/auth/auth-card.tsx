@@ -2,7 +2,8 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { authErrorMessage, useAuth } from "@/lib/firebase/auth-context";
 import { toast } from "sonner";
 import { Logo } from "@/components/brand/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -21,7 +22,19 @@ function GoogleMark() {
   );
 }
 
-function Field({ label, type = "text", autoComplete }: { label: string; type?: string; autoComplete?: string }) {
+function Field({
+  label,
+  type = "text",
+  autoComplete,
+  value,
+  onChange,
+}: {
+  label: string;
+  type?: string;
+  autoComplete?: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
   const id = label.toLowerCase().replace(/\s+/g, "-");
   return (
     <div>
@@ -34,6 +47,8 @@ function Field({ label, type = "text", autoComplete }: { label: string; type?: s
         type={type}
         autoComplete={autoComplete}
         required
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
         className="h-11 w-full rounded-xl border border-line bg-bg px-3.5 outline-none transition-colors duration-150 focus:border-sky"
       />
     </div>
@@ -42,11 +57,25 @@ function Field({ label, type = "text", autoComplete }: { label: string; type?: s
 
 export function AuthCard() {
   const [mode, setMode] = useState<Mode>("signin");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState<"google" | "email" | null>(null);
   const router = useRouter();
+  const { user, profile, signInGoogle, signInEmail, signUpEmail } = useAuth();
 
-  function enter(dest: "/app" | "/admin") {
-    toast.success("Preview mode", { description: "Real sign-in turns on once Firebase is connected." });
-    router.push(dest);
+  useEffect(() => {
+    if (user && profile) router.replace(profile.role === "admin" ? "/admin" : "/app");
+  }, [user, profile, router]);
+
+  async function run(kind: "google" | "email", fn: () => Promise<void>) {
+    setBusy(kind);
+    try {
+      await fn();
+    } catch (e) {
+      toast.error(authErrorMessage(e));
+      setBusy(null);
+    }
   }
 
   return (
@@ -88,11 +117,12 @@ export function AuthCard() {
 
       <button
         type="button"
-        onClick={() => enter("/app")}
-        className="mt-6 flex h-11 w-full items-center justify-center gap-3 rounded-xl border border-line bg-bg font-semibold transition-colors duration-150 hover:bg-fg/5"
+        onClick={() => run("google", signInGoogle)}
+        disabled={busy !== null}
+        className="mt-6 flex h-11 disabled:opacity-60 w-full items-center justify-center gap-3 rounded-xl border border-line bg-bg font-semibold transition-colors duration-150 hover:bg-fg/5"
       >
         <GoogleMark />
-        Continue with Google
+        {busy === "google" ? "Opening Google…" : "Continue with Google"}
       </button>
 
       <div className="my-5 flex items-center gap-3 text-xs text-muted">
@@ -104,7 +134,7 @@ export function AuthCard() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          enter("/app");
+          run("email", () => (mode === "signin" ? signInEmail(email, password) : signUpEmail(name.trim(), email, password)));
         }}
         className="space-y-4"
       >
@@ -117,28 +147,28 @@ export function AuthCard() {
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.15 }}
             >
-              <Field label="Full name" autoComplete="name" />
+              <Field label="Full name" autoComplete="name" value={name} onChange={setName} />
             </motion.div>
           )}
         </AnimatePresence>
-        <Field label="Email" type="email" autoComplete="email" />
-        <Field label="Password" type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} />
+        <Field label="Email" type="email" autoComplete="email" value={email} onChange={setEmail} />
+        <Field
+          label="Password"
+          type="password"
+          autoComplete={mode === "signin" ? "current-password" : "new-password"}
+          value={password}
+          onChange={setPassword}
+        />
         <button
           type="submit"
-          className="group relative h-11 w-full overflow-hidden rounded-xl bg-blue font-semibold text-white"
+          disabled={busy !== null}
+          className="group relative h-11 disabled:opacity-60 w-full overflow-hidden rounded-xl bg-blue font-semibold text-white"
         >
           <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-300 group-hover:translate-x-full" />
-          {mode === "signin" ? "Sign in" : "Create my account"}
+          {busy === "email" ? "One moment…" : mode === "signin" ? "Sign in" : "Create my account"}
         </button>
       </form>
 
-      <button
-        type="button"
-        onClick={() => enter("/admin")}
-        className="mt-5 w-full text-center text-sm text-muted underline-offset-4 hover:text-fg hover:underline"
-      >
-        Preview the admin dashboard
-      </button>
     </motion.div>
   );
 }

@@ -5,21 +5,34 @@ import { Check, PartyPopper, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { StatusBadge } from "@/components/app/shell";
-import { POINTS, STATUS_META, TYPE_COLOR } from "@/lib/constants";
+import { STATUS_META, TYPE_COLOR } from "@/lib/constants";
 import type { Sponsor } from "@/types";
+import { approveSponsor, rejectSponsor } from "@/lib/firebase/data";
 
 export function ApprovalQueue({ sponsors }: { sponsors: Sponsor[] }) {
   const [handled, setHandled] = useState<string[]>([]);
-  const pending = sponsors.filter((s) => !s.approved && s.status !== "not_contacted" && !handled.includes(s.id));
+  const pending = sponsors.filter((s) => !s.approved && !s.reviewed && !handled.includes(s.id));
   const visible = pending.slice(0, 5);
 
-  const approve = (s: Sponsor) => {
+  const approve = async (s: Sponsor) => {
     setHandled((h) => [...h, s.id]);
-    toast.success(`+${POINTS[s.partnerType]} points to ${s.ownerName}`);
+    try {
+      const pts = await approveSponsor(s.id);
+      toast.success(pts ? `+${pts} points to ${s.ownerName}` : `${s.name} was already approved`);
+    } catch {
+      setHandled((h) => h.filter((id) => id !== s.id));
+      toast.error(`Couldn't approve ${s.name}. Try again.`);
+    }
   };
-  const reject = (s: Sponsor) => {
+  const reject = async (s: Sponsor) => {
     setHandled((h) => [...h, s.id]);
-    toast(`${s.name} sent back to ${s.ownerName}`);
+    try {
+      await rejectSponsor(s.id);
+      toast(`${s.name} marked as not counted`);
+    } catch {
+      setHandled((h) => h.filter((id) => id !== s.id));
+      toast.error(`Couldn't update ${s.name}. Try again.`);
+    }
   };
 
   return (

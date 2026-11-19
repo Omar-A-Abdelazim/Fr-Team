@@ -10,7 +10,8 @@ import { MyHeader } from "@/components/member/my-header";
 import { AddSponsor } from "@/components/member/add-sponsor";
 import { RefusalDialog } from "@/components/member/refusal-dialog";
 import { STATUS_META, STATUSES, TYPE_COLOR } from "@/lib/constants";
-import { CURRENT_USER_ID, MOCK_SPONSORS } from "@/lib/mock-data";
+import { useAuth } from "@/lib/firebase/auth-context";
+import { createSponsor, setStatus, useSponsors } from "@/lib/firebase/data";
 import type { Sponsor, SponsorStatus } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -32,7 +33,10 @@ function LinkedInIcon() {
 }
 
 export function Workspace() {
-  const [sponsors, setSponsors] = useState<Sponsor[]>(MOCK_SPONSORS);
+  const { profile } = useAuth();
+  const me = profile!;
+  const CURRENT_USER_ID = me.id;
+  const { sponsors, loading, error } = useSponsors();
   const [scope, setScope] = useState<"mine" | "team">("mine");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["key"]>("all");
   const [q, setQ] = useState("");
@@ -48,15 +52,16 @@ export function Workspace() {
       .filter((s) => filter === "all" || s.status === filter)
       .filter((s) => !q || s.name.toLowerCase().includes(q.toLowerCase()))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  }, [sponsors, scope, filter, q]);
+  }, [sponsors, scope, filter, q, CURRENT_USER_ID]);
 
-  function update(id: string, patch: Partial<Sponsor>) {
-    setSponsors((all) => all.map((s) => (s.id === id ? { ...s, ...patch, updatedAt: new Date().toISOString() } : s)));
-  }
-
-  function changeStatus(s: Sponsor, status: SponsorStatus) {
+  async function changeStatus(s: Sponsor, status: SponsorStatus) {
     if (status === "refused") return setRefusing(s);
-    update(s.id, { status, refusal: null });
+    try {
+      await setStatus(s.id, status, me.id);
+    } catch {
+      toast.error(`Couldn't update ${s.name}. Check your connection and try again.`);
+      return;
+    }
     if (status === "accepted" || status === "closed") {
       confetti({ particleCount: 140, spread: 80, origin: { y: 0.6 }, colors: ["#f5b83d", "#4cc3f2", "#3dd6a3", "#ffffff"] });
       toast.success(`${s.name} accepted`, { description: "Waiting for the FR Head to approve your points." });
@@ -66,7 +71,7 @@ export function Workspace() {
   return (
     <div className="mx-auto max-w-6xl space-y-8">
       <MyHeader
-        name="Omar"
+        name={me.name.split(" ")[0]}
         points={points}
         stats={[
           { label: "Logged", value: mine.length, color: "var(--fg)" },
@@ -228,7 +233,19 @@ export function Workspace() {
           </AnimatePresence>
         </motion.ul>
 
-        {rows.length === 0 && (
+        {loading && (
+          <ul className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Loading sponsors">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <li key={i} className="h-40 animate-pulse rounded-2xl border border-line bg-raised" />
+            ))}
+          </ul>
+        )}
+        {error && (
+          <p className="mt-6 rounded-2xl border border-coral/40 bg-coral/10 p-4 text-sm">
+            Couldn&apos;t load sponsors: {error}
+          </p>
+        )}
+        {!loading && !error && rows.length === 0 && (
           <div className="mt-6 rounded-2xl border border-dashed border-line p-10 text-center">
             <p className="font-semibold">Nothing here yet</p>
             <p className="mt-1 text-sm text-muted">Log your first sponsor or change the filter.</p>
@@ -240,34 +257,32 @@ export function Workspace() {
         open={adding}
         onClose={() => setAdding(false)}
         pool={sponsors}
-        onSave={(d) => {
-          setSponsors((all) => [
-            {
-              ...d,
-              id: `s${Date.now()}`,
-              ownerId: CURRENT_USER_ID,
-              ownerName: "Omar",
-              status: "not_contacted",
-              refusal: null,
-              approved: false,
-              points: 0,
-              updatedAt: new Date().toISOString(),
-            },
-            ...all,
-          ]);
-          setScope("mine");
-          setFilter("all");
-          toast.success(`${d.name} logged`, { description: "It shows up for the whole team now." });
+        onSave={async (d) => {
+          try {
+            await createSponsor(d, { id: me.id, name: me.name });
+            setScope("mine");
+            setFilter("all");
+            toast.success(`${d.name} logged`, { description: "It shows up for the whole team now." });
+            return true;
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : "Couldn't save. Try again.");
+            return false;
+          }
         }}
       />
 
       <RefusalDialog
         company={refusing?.name ?? null}
         onCancel={() => setRefusing(null)}
-        onSave={(r) => {
-          if (refusing) update(refusing.id, { status: "refused", refusal: r });
-          toast(`Refusal saved for ${refusing?.name}`);
-          setRefusing(null);
+        onSave={async (r) => {
+          if (!refusing) return;
+          try {
+            await setStatus(refusing.id, "refused", me.id, r);
+            toast(`Refusal saved for ${refusing.name}`);
+            setRefusing(null);
+          } catch {
+            toast.error("Couldn't save the refusal. Try again.");
+          }
         }}
       />
     </div>

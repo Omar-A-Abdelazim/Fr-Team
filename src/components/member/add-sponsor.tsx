@@ -61,12 +61,13 @@ export function AddSponsor({
 }: {
   open: boolean;
   onClose: () => void;
-  onSave: (d: Draft) => void;
+  onSave: (d: Draft) => Promise<boolean>;
   pool: Sponsor[];
 }) {
   const [d, setD] = useState<Draft>(EMPTY);
   const [step, setStep] = useState(0);
   const [ignored, setIgnored] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const set = <K extends keyof Draft>(k: K) => (v: Draft[K]) => setD((p) => ({ ...p, [k]: v }));
 
   const dup = useMemo(() => findDuplicate(d, pool), [d, pool]);
@@ -244,17 +245,17 @@ export function AddSponsor({
               )}
               <button
                 type="button"
-                disabled={!canNext}
-                onClick={() => {
-                  if (step < STEPS.length - 1) setStep((s) => s + 1);
-                  else {
-                    onSave(d);
-                    close();
-                  }
+                disabled={!canNext || saving}
+                onClick={async () => {
+                  if (step < STEPS.length - 1) return setStep((s) => s + 1);
+                  setSaving(true);
+                  const ok = await onSave(d);
+                  setSaving(false);
+                  if (ok) close();
                 }}
                 className="h-11 flex-1 rounded-xl bg-gold font-semibold text-[#071a33] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {step < STEPS.length - 1 ? "Next" : "Save sponsor"}
+                {step < STEPS.length - 1 ? "Next" : saving ? "Saving…" : "Save sponsor"}
               </button>
             </footer>
           </motion.aside>

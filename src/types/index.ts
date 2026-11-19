@@ -42,6 +42,8 @@ export type Sponsor = {
   refusal: Refusal | null;
   approved: boolean;
   points: number;
+  reviewed?: boolean;
+  createdAt?: string;
   updatedAt: string;
 };
 
@@ -51,4 +53,5 @@ export type Member = {
   email: string;
   role: "member" | "admin";
   color: string;
+  photoURL?: string | null;
 };

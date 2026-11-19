@@ -1,0 +1,55 @@
+rules_version = '2';
+
+// FR Hub security rules. Paste into Firebase Console → Firestore → Rules → Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function me() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function isAdmin() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && me().role == "admin"; }
+    // Keep in sync with NEXT_PUBLIC_ADMIN_EMAILS.
+    function bootstrapAdmin() {
+      return request.auth.token.email in ["omarahmedabdelazim2005@gmail.com"]
+        && request.auth.token.email_verified == true;
+    }
+    function changes(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasAny(keys); }
+
+    match /users/{uid} {
+      allow read: if signedIn();
+      // a new user can only create their own profile, as a member (or admin if on the bootstrap list)
+      allow create: if signedIn() && request.auth.uid == uid
+        && (request.resource.data.role == "member" || (request.resource.data.role == "admin" && bootstrapAdmin()));
+      // users may edit their own name/photo; only admins may change roles
+      allow update: if (signedIn() && request.auth.uid == uid && !changes(["role", "email"])) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /sponsors/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.approved == false
+        && request.resource.data.points == 0
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 1;
+      // owners edit their own entries but never approval or points
+      allow update: if (signedIn() && resource.data.ownerId == request.auth.uid
+                        && !changes(["ownerId", "approved", "reviewed", "points", "approvedAt"]))
+                    || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Unique company keys (website domain, LinkedIn slug). Create-only: a second claim is rejected.
+    match /sponsorKeys/{key} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    match /settings/{doc} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+  }
+}

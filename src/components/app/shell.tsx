@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useAuth } from "@/lib/firebase/auth-context";
 import { motion } from "framer-motion";
 import { BarChart3, Building2, CheckCheck, LogOut, Mail, Sparkles, Trophy } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
@@ -22,12 +23,16 @@ const ADMIN_NAV = [
 
 export function Shell({ children, variant }: { children: React.ReactNode; variant: "member" | "admin" }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { profile, signOut } = useAuth();
+  const isAdmin = profile?.role === "admin";
+  const name = profile?.name ?? "";
   const nav = variant === "admin" ? ADMIN_NAV : MEMBER_NAV;
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[248px_1fr]">
       <aside className="sticky top-0 z-40 flex items-center justify-between border-b border-line bg-raised/90 px-4 py-3 backdrop-blur lg:h-dvh lg:flex-col lg:items-stretch lg:justify-start lg:border-b-0 lg:border-r lg:px-4 lg:py-6">
-        <Link href="/" className="lg:px-2">
+        <Link href="/app" className="lg:px-2">
           <Logo />
         </Link>
 
@@ -58,27 +63,48 @@ export function Shell({ children, variant }: { children: React.ReactNode; varian
               );
             })}
           </ul>
-          <Link
-            href={variant === "admin" ? "/app" : "/admin"}
-            className="mt-6 block rounded-xl border border-dashed border-line px-3 py-2.5 text-sm text-muted hover:text-fg"
-          >
-            {variant === "admin" ? "Switch to member view" : "Switch to admin view"}
-          </Link>
+          {isAdmin && (
+            <Link
+              href={variant === "admin" ? "/app" : "/admin"}
+              className="mt-6 block rounded-xl border border-dashed border-line px-3 py-2.5 text-sm text-muted hover:text-fg"
+            >
+              {variant === "admin" ? "Switch to member view" : "Switch to admin view"}
+            </Link>
+          )}
         </nav>
 
         <div className="flex items-center gap-2 lg:mt-auto lg:justify-between lg:rounded-2xl lg:border lg:border-line lg:p-3">
           <div className="hidden items-center gap-2.5 lg:flex">
-            <span className="grid size-9 place-items-center rounded-full bg-sky font-display font-bold text-[#071a33]">O</span>
-            <div className="text-sm leading-tight">
-              <p className="font-semibold">Omar</p>
-              <p className="text-muted">{variant === "admin" ? "FR Head" : "FR member"}</p>
+            {profile?.photoURL ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={profile.photoURL} alt="" className="size-9 rounded-full" referrerPolicy="no-referrer" />
+            ) : (
+              <span
+                className="grid size-9 place-items-center rounded-full font-display font-bold text-[#071a33]"
+                style={{ background: profile?.color ?? "var(--sky)" }}
+              >
+                {name[0]?.toUpperCase()}
+              </span>
+            )}
+            <div className="min-w-0 text-sm leading-tight">
+              <p className="truncate font-semibold">{name}</p>
+              <p className="text-muted">{isAdmin ? "Admin" : "FR member"}</p>
             </div>
           </div>
           <div className="flex items-center gap-1">
             <ThemeToggle />
-            <Link href="/" aria-label="Sign out" className="grid size-10 place-items-center rounded-full text-muted hover:bg-fg/5 hover:text-fg">
+            <button
+              type="button"
+              onClick={async () => {
+                await signOut();
+                router.replace("/");
+              }}
+              aria-label="Sign out"
+              title="Sign out"
+              className="grid size-10 place-items-center rounded-full text-muted hover:bg-fg/5 hover:text-fg"
+            >
               <LogOut className="size-4" />
-            </Link>
+            </button>
           </div>
         </div>
       </aside>
