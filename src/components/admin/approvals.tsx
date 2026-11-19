@@ -9,10 +9,10 @@ import { STATUS_META, TYPE_COLOR } from "@/lib/constants";
 import type { Sponsor } from "@/types";
 import { approveSponsor, rejectSponsor } from "@/lib/firebase/data";
 
-export function ApprovalQueue({ sponsors }: { sponsors: Sponsor[] }) {
+export function ApprovalQueue({ sponsors, limit = 5 }: { sponsors: Sponsor[]; limit?: number }) {
   const [handled, setHandled] = useState<string[]>([]);
   const pending = sponsors.filter((s) => !s.approved && !s.reviewed && !handled.includes(s.id));
-  const visible = pending.slice(0, 5);
+  const visible = pending.slice(0, limit);
 
   const approve = async (s: Sponsor) => {
     setHandled((h) => [...h, s.id]);
