@@ -1,4 +1,3 @@
-import { adminAuth, adminDb, adminInitError } from "@/lib/firebase/admin";
 
 export const maxDuration = 60;
 
@@ -36,6 +35,14 @@ export async function POST(req: Request) {
 }
 
 async function handle(req: Request) {
+  // Imported here so a failure while loading firebase-admin is reported instead of crashing the route.
+  let mod: typeof import("@/lib/firebase/admin");
+  try {
+    mod = await import("@/lib/firebase/admin");
+  } catch (e) {
+    return json({ error: `Couldn't load Firebase admin: ${(e as Error).message}`.slice(0, 240) }, 500);
+  }
+  const { adminAuth, adminDb, adminInitError } = mod;
   if (!adminAuth || !adminDb) return json({ error: adminInitError ?? "Server isn't configured" }, 500);
 
   const header = req.headers.get("authorization") ?? "";
