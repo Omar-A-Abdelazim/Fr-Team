@@ -1,4 +1,4 @@
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { adminAuth, adminDb, adminInitError } from "@/lib/firebase/admin";
 
 export const maxDuration = 60;
 
@@ -28,7 +28,15 @@ function parseModelJson(text: string): { subject: string; body: string; research
 }
 
 export async function POST(req: Request) {
-  if (!adminAuth || !adminDb) return json({ error: "Server isn't configured" }, 503);
+  try {
+    return await handle(req);
+  } catch (e) {
+    return json({ error: `Server error: ${(e as Error).message}`.slice(0, 240) }, 500);
+  }
+}
+
+async function handle(req: Request) {
+  if (!adminAuth || !adminDb) return json({ error: adminInitError ?? "Server isn't configured" }, 500);
 
   const header = req.headers.get("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
@@ -37,15 +45,15 @@ export async function POST(req: Request) {
   let uid: string;
   try {
     uid = (await adminAuth.verifyIdToken(token)).uid;
-  } catch {
-    return json({ error: "Your session expired. Sign in again." }, 401);
+  } catch (e) {
+    return json({ error: `Couldn't verify your sign-in: ${(e as Error).message}`.slice(0, 240) }, 401);
   }
 
   try {
     const snap = await adminDb.doc(`users/${uid}`).get();
     if (snap.data()?.role !== "admin") return json({ error: "Admins only." }, 403);
-  } catch {
-    return json({ error: "Couldn't check your permissions." }, 500);
+  } catch (e) {
+    return json({ error: `Couldn't check your permissions: ${(e as Error).message}`.slice(0, 240) }, 500);
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
@@ -116,7 +124,13 @@ export async function POST(req: Request) {
   } catch {
     return json({ error: "Couldn't reach Gemini. Try again." }, 502);
   }
-  if (!res.ok) return json({ error: `Gemini returned an error (${res.status}).` }, 502);
+  if (!res.ok) {
+    const detail = await res
+      .json()
+      .then((j: { error?: { message?: string } }) => j.error?.message ?? "")
+      .catch(() => "");
+    return json({ error: `Gemini returned an error (${res.status}). ${detail}`.trim().slice(0, 300) }, 502);
+  }
 
   type GeminiResponse = {
     candidates?: {

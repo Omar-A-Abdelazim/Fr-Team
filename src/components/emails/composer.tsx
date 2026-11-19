@@ -185,7 +185,13 @@ export function EmailComposer() {
         research?: { summary?: string; sources?: Source[] };
         error?: string;
       };
-      if (!res.ok) throw new Error(data.error || "The draft didn't come back.");
+      if (!res.ok)
+        throw new Error(
+          data.error ||
+            (res.status === 504
+              ? "The server took too long (504)."
+              : `The draft didn't come back (error ${res.status}).`),
+        );
       patch(t.id, {
         status: "ready",
         subject: data.subject ?? "",

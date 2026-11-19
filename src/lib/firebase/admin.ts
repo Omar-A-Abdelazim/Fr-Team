@@ -22,7 +22,16 @@ function init(): App | null {
   });
 }
 
-const app = init();
+let initError: string | null = null;
+let app: App | null = null;
+try {
+  app = init();
+  if (!app) initError = "Firebase admin env vars are missing.";
+} catch (e) {
+  initError = `Firebase admin key couldn't be read: ${(e as Error).message}`.slice(0, 200);
+}
+
+export const adminInitError = initError;
 
 /** Both are null when the FIREBASE_ADMIN_* env vars are missing. */
 export const adminAuth: Auth | null = app ? getAuth(app) : null;
