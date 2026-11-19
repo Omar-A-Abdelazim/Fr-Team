@@ -1,26 +1,117 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+  FR Hub tokens
+  ink      #071A33  deep IEEE navy (dark base)
+  blue     #00629B  IEEE blue (primary)
+  sky      #4CC3F2  links, live lines
+  gold     #F5B83D  money, points, wins
+  mint     #3DD6A3  accepted deals
+  coral    #F47C6B  refused
+*/
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #f3f7fb;
+  --bg-raised: #ffffff;
+  --fg: #0b2340;
+  --fg-muted: #4d6380;
+  --line: rgb(11 35 64 / 0.1);
+  --blue: #00629b;
+  --sky: #1597d1;
+  --gold: #d9971a;
+  --mint: #12a678;
+  --coral: #d9573f;
+  --amber: #e07b1f;
+  --glow: rgb(0 98 155 / 0.18);
+}
+
+.dark {
+  --bg: #071a33;
+  --bg-raised: #0c2546;
+  --fg: #eaf2fb;
+  --fg-muted: #9db3cf;
+  --line: rgb(234 242 251 / 0.1);
+  --blue: #2a8fd0;
+  --sky: #4cc3f2;
+  --gold: #f5b83d;
+  --mint: #3dd6a3;
+  --coral: #f47c6b;
+  --amber: #fb923c;
+  --glow: rgb(76 195 242 / 0.22);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg: var(--bg);
+  --color-raised: var(--bg-raised);
+  --color-fg: var(--fg);
+  --color-muted: var(--fg-muted);
+  --color-line: var(--line);
+  --color-blue: var(--blue);
+  --color-sky: var(--sky);
+  --color-gold: var(--gold);
+  --color-mint: var(--mint);
+  --color-coral: var(--coral);
+  --color-amber: var(--amber);
+  --font-display: "Bricolage Grotesque Variable", "Cairo", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Instrument Sans Variable", "Cairo", ui-sans-serif, system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+::selection {
+  background: var(--gold);
+  color: #071a33;
+}
+
+:focus-visible {
+  outline: 2px solid var(--sky);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.dot-grid {
+  background-image: radial-gradient(var(--line) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+@keyframes spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.animate-spin-slow {
+  animation: spin-slow 60s linear infinite;
+}
+.animate-spin-slower {
+  animation: spin-slow 110s linear infinite reverse;
+}
+
+@keyframes drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(30px, -24px) scale(1.08); }
+}
+.animate-drift {
+  animation: drift 24s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .animate-spin-slow,
+  .animate-spin-slower,
+  .animate-drift {
+    animation: none;
+  }
 }
