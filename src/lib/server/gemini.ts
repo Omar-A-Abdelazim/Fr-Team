@@ -13,7 +13,10 @@ export type GeminiResult =
   | { ok: true; text: string; usedSearch: boolean; sources: { title: string; url: string }[] }
   | { ok: false; error: string; status: number };
 
-export async function gemini(prompt: string, opts: { search?: boolean; noSearchPrompt?: string } = {}): Promise<GeminiResult> {
+export async function gemini(
+  prompt: string,
+  opts: { search?: boolean; noSearchPrompt?: string; timeoutMs?: number } = {},
+): Promise<GeminiResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { ok: false, error: "AI isn't set up yet (GEMINI_API_KEY is missing).", status: 503 };
 
@@ -36,7 +39,7 @@ export async function gemini(prompt: string, opts: { search?: boolean; noSearchP
           contents: [{ role: "user", parts: [{ text: a.search ? prompt : (opts.noSearchPrompt ?? prompt) }] }],
           ...(a.search ? { tools: [{ google_search: {} }] } : {}),
         }),
-        signal: AbortSignal.timeout(50_000),
+        signal: AbortSignal.timeout(opts.timeoutMs ?? 50_000),
       });
     } catch {
       continue;

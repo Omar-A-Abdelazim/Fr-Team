@@ -12,7 +12,7 @@ export type AiResult =
 
 type GroqMessage = { role: "system" | "user"; content: string };
 
-async function groq(prompt: string, search: boolean): Promise<AiResult> {
+async function groq(prompt: string, search: boolean, timeoutMs = 50_000): Promise<AiResult> {
   const key = process.env.GROQ_API_KEY;
   if (!key) return { ok: false, error: "Groq isn't set up.", status: 503 };
   const models = search
@@ -30,7 +30,7 @@ async function groq(prompt: string, search: boolean): Promise<AiResult> {
           messages: [{ role: "user", content: prompt }] satisfies GroqMessage[],
           temperature: 0.5,
         }),
-        signal: AbortSignal.timeout(50_000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
       continue;
@@ -64,16 +64,19 @@ async function groq(prompt: string, search: boolean): Promise<AiResult> {
  * Asks the AI. With `search`, the model may look things up on the web.
  * `noSearchPrompt` is used when a provider can't search (so the prompt doesn't ask for it).
  */
-export async function ask(prompt: string, opts: { search?: boolean; noSearchPrompt?: string } = {}): Promise<AiResult> {
+export async function ask(
+  prompt: string,
+  opts: { search?: boolean; noSearchPrompt?: string; timeoutMs?: number } = {},
+): Promise<AiResult> {
   const g = await gemini(prompt, opts);
   if (g.ok) {
     // Prefer a searched answer; if Gemini could only answer without search, try Groq's search model first.
     if (!opts.search || g.usedSearch || !process.env.GROQ_API_KEY) return { ...g, provider: "gemini" };
-    const q = await groq(prompt, true);
+    const q = await groq(prompt, true, opts.timeoutMs);
     if (q.ok && q.usedSearch) return q;
     return { ...g, provider: "gemini" };
   }
-  const q = await groq(opts.search ? prompt : (opts.noSearchPrompt ?? prompt), !!opts.search);
+  const q = await groq(opts.search ? prompt : (opts.noSearchPrompt ?? prompt), !!opts.search, opts.timeoutMs);
   if (q.ok) return q;
   if (!process.env.GEMINI_API_KEY && !process.env.GROQ_API_KEY) {
     return { ok: false, error: "AI isn't set up yet (add GEMINI_API_KEY or GROQ_API_KEY).", status: 503 };

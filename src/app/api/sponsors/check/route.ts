@@ -2,7 +2,7 @@ import { FIRESTORE, getCaller, isFail, json } from "@/lib/server/auth";
 import { ask, parseJson } from "@/lib/server/ai";
 import { domainOf, normalizeName } from "@/lib/duplicates";
 
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 type Row = { id: string; name: string; owner: string; email: string; phone: string; website: string; facebook: string; linkedin: string };
 
@@ -122,10 +122,11 @@ export async function POST(req: Request) {
       'Reply with ONLY JSON: {"duplicate": boolean, "confidence": number 0-1, "matchId": string or null, "reason": string (one short sentence for the team, naming the match)}',
     ].join("\n");
 
-    const r = await ask(prompt, {
-      search: true,
-      noSearchPrompt: prompt.replace("If you're unsure whether two names refer to the same company, use Google Search to check.", "Use what you know about Egyptian companies."),
-    });
+    // Fast check without web search: models know common Egyptian brands in Arabic and English.
+    const r = await ask(
+      prompt.replace("If you're unsure whether two names refer to the same company, use Google Search to check.", "Use what you know about companies in Egypt."),
+      { timeoutMs: 12_000 },
+    );
     if (!r.ok) return json({ error: r.error, checked: false }, r.status);
     const out = parseJson<{ duplicate?: boolean; confidence?: number; matchId?: string | null; reason?: string }>(r.text);
     if (!out) return json({ error: "The AI didn't return a usable answer.", checked: false }, 502);

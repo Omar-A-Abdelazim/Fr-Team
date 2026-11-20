@@ -29,12 +29,12 @@ export type SaveFlag = { matchId?: string | null; matchName?: string | null; rea
 type AiMatch = { matchId: string | null; matchName: string; matchOwner: string; reason: string };
 
 /** Asks the server to compare the new entry with every logged sponsor. Returns null when the check can't run. */
-async function checkDuplicate(d: Draft): Promise<{ duplicate: boolean; match?: AiMatch } | null> {
+async function checkDuplicate(d: Draft): Promise<{ duplicate: boolean; match?: AiMatch } | { error: string }> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 25000);
+  const timer = setTimeout(() => ctrl.abort(), 40000);
   try {
     const token = await auth.currentUser?.getIdToken();
-    if (!token) return null;
+    if (!token) return { error: "You're signed out." };
     const res = await fetch("/api/sponsors/check", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -50,7 +50,10 @@ async function checkDuplicate(d: Draft): Promise<{ duplicate: boolean; match?: A
       }),
       signal: ctrl.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      return { error: j.error || `Server error ${res.status}` };
+    }
     const data = (await res.json()) as {
       duplicate?: boolean;
       matchId?: string | null;
@@ -68,8 +71,8 @@ async function checkDuplicate(d: Draft): Promise<{ duplicate: boolean; match?: A
         reason: data.reason ?? "It looks like the same company.",
       },
     };
-  } catch {
-    return null;
+  } catch (e) {
+    return { error: (e as Error).name === "AbortError" ? "The check took too long." : "Couldn't reach the server." };
   } finally {
     clearTimeout(timer);
   }
@@ -152,8 +155,8 @@ export function AddSponsor({
     setChecking(true);
     const result = await checkDuplicate(d);
     setChecking(false);
-    if (result?.duplicate && result.match) return setAiMatch(result.match);
-    if (!result) toast("Couldn't run the AI duplicate check; saved normally.");
+    if ("duplicate" in result && result.duplicate && result.match) return setAiMatch(result.match);
+    if ("error" in result) toast("Couldn't run the AI duplicate check; saved normally.", { description: result.error });
     // The member overrode the instant warning, so an admin still reviews it.
     return save(!!dup, dup ? clientFlag : null);
   }
