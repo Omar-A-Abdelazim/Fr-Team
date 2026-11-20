@@ -5,7 +5,15 @@ export const FB_API_KEY = process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "AIzaSyBuS
 export const FB_PROJECT = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? "ieee-met-fr-hub";
 export const FIRESTORE = `https://firestore.googleapis.com/v1/projects/${FB_PROJECT}/databases/(default)/documents`;
 
-export type Caller = { uid: string; token: string; name: string; email: string; role: "member" | "admin" };
+export type Caller = {
+  uid: string;
+  token: string;
+  name: string;
+  email: string;
+  role: "member" | "admin";
+  position: string;
+  phone: string;
+};
 type Fail = { error: string; status: number };
 
 export const json = (body: unknown, status = 200) => Response.json(body, { status });
@@ -39,7 +47,15 @@ export async function callerFromToken(token: string, opts: { admin?: boolean } =
   const rejected = (f as Record<string, { booleanValue?: boolean }>).rejected?.booleanValue;
   if (approved === false || rejected === true) return { error: "Your account is waiting for approval.", status: 403 };
   if (opts.admin && role !== "admin") return { error: "Admins only.", status: 403 };
-  return { uid, token, role, name: f.name?.stringValue ?? "", email: f.email?.stringValue ?? "" };
+  return {
+    uid,
+    token,
+    role,
+    name: f.name?.stringValue ?? "",
+    email: f.email?.stringValue ?? "",
+    position: f.position?.stringValue ?? "",
+    phone: f.phone?.stringValue ?? "",
+  };
 }
 
 export function isFail(x: Caller | Fail): x is Fail {

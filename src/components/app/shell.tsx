@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/firebase/auth-context";
+import { useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import { Inbox, UserCheck, BarChart3, Building2, CheckCheck, LogOut, Mail, Sparkles, Trophy } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { cn } from "@/lib/utils";
+import { ProfileDialog } from "@/components/app/profile-dialog";
 import { Ambient } from "@/components/fx/ambient";
 
 const MotionLink = motion.create(Link);
@@ -30,6 +32,25 @@ function NavIcon({ icon: Icon, active, reduce }: { icon: LucideIcon; active: boo
       >
         <Icon className={cn("size-[18px]", active && "text-sky")} aria-hidden />
       </motion.span>
+    </span>
+  );
+}
+
+function UserAvatar({ photoURL, color, name, missing, size }: { photoURL?: string | null; color?: string | null; name: string; missing: boolean; size: number }) {
+  return (
+    <span className="relative shrink-0" style={{ width: size, height: size }}>
+      {photoURL ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={photoURL} alt="" className="size-full rounded-full" referrerPolicy="no-referrer" />
+      ) : (
+        <span
+          className="grid size-full place-items-center rounded-full font-display font-bold text-[#071a33]"
+          style={{ background: color ?? "var(--sky)" }}
+        >
+          {name[0]?.toUpperCase()}
+        </span>
+      )}
+      {missing && <span aria-hidden className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-raised bg-amber" />}
     </span>
   );
 }
@@ -57,6 +78,9 @@ export function Shell({ children, variant }: { children: React.ReactNode; varian
   const name = profile?.name ?? "";
   const nav = variant === "admin" ? ADMIN_NAV : MEMBER_NAV;
   const reduce = !!useReducedMotion();
+  const [profileOpen, setProfileOpen] = useState(false);
+  const missing = !!profile && (!profile.position?.trim() || !profile.phone?.trim());
+  const nudge = missing ? "Add your position and phone for email signatures" : undefined;
 
   return (
     <div className="relative min-h-dvh lg:grid lg:grid-cols-[248px_1fr]">
@@ -105,23 +129,24 @@ export function Shell({ children, variant }: { children: React.ReactNode; varian
         </nav>
 
         <div className="flex items-center gap-2 lg:mt-auto lg:justify-between lg:rounded-2xl lg:border lg:border-line lg:p-3">
-          <div className="hidden min-w-0 flex-1 items-center gap-2.5 lg:flex">
-            {profile?.photoURL ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={profile.photoURL} alt="" className="size-9 shrink-0 rounded-full" referrerPolicy="no-referrer" />
-            ) : (
-              <span
-                className="grid size-9 shrink-0 place-items-center rounded-full font-display font-bold text-[#071a33]"
-                style={{ background: profile?.color ?? "var(--sky)" }}
-              >
-                {name[0]?.toUpperCase()}
-              </span>
-            )}
-            <div className="min-w-0 text-sm leading-tight">
-              <p className="truncate font-semibold">{name}</p>
-              <p className="truncate text-muted">{isAdmin ? "Admin" : "FR member"}</p>
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={() => setProfileOpen(true)}
+            aria-label="Edit your profile"
+            title={nudge ?? "Edit your profile"}
+            className="flex min-w-0 items-center gap-2.5 rounded-full text-left lg:flex-1 lg:rounded-xl lg:hover:bg-fg/5"
+          >
+            <span className="lg:hidden">
+              <UserAvatar photoURL={profile?.photoURL} color={profile?.color} name={name} missing={missing} size={32} />
+            </span>
+            <span className="hidden lg:block">
+              <UserAvatar photoURL={profile?.photoURL} color={profile?.color} name={name} missing={missing} size={36} />
+            </span>
+            <span className="hidden min-w-0 text-sm leading-tight lg:block">
+              <span className="block truncate font-semibold">{name}</span>
+              <span className="block truncate text-muted">{profile?.position?.trim() || (isAdmin ? "Admin" : "FR member")}</span>
+            </span>
+          </button>
           <div className="flex shrink-0 items-center lg:-mr-1">
             <ThemeToggle />
             <button
@@ -156,6 +181,8 @@ export function Shell({ children, variant }: { children: React.ReactNode; varian
           );
         })}
       </nav>
+
+      <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
 
       <motion.main
         initial={{ opacity: 0, y: 8 }}

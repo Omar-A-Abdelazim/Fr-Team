@@ -56,6 +56,9 @@ export type Member = {
   role: "member" | "admin";
   color: string;
   photoURL?: string | null;
+  /** Shown in email signatures, e.g. "Head of Fundraising". */
+  position?: string;
+  phone?: string;
   /** false while waiting for an admin; missing on accounts created before approvals existed */
   approved?: boolean;
   rejected?: boolean;

@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  getDoc,
+  setDoc,
   where,
   arrayUnion,
   collection,
@@ -291,4 +293,34 @@ export function linkEmails(emails: EmailLog[], sponsors: Sponsor[]): EmailLog[] 
       refusalCategory: s.status === "refused" ? (s.refusal?.category ?? "") : "",
     };
   });
+}
+
+/** Lets a member edit how they appear (name, position, phone). Role and approval stay admin-only. */
+export async function updateMyProfile(uid: string, p: { name: string; position: string; phone: string }) {
+  await updateDoc(doc(db, "users", uid), { name: p.name.trim(), position: p.position.trim(), phone: p.phone.trim() });
+}
+
+export type BranchFacts = { facts: string; updatedBy?: string };
+
+/** Branch numbers and proof points the AI uses in every outreach email (admins edit them). */
+export function useBranchFacts() {
+  const [value, setValue] = useState<BranchFacts | null>(null);
+  useEffect(
+    () =>
+      onSnapshot(
+        doc(db, "settings", "branch"),
+        (snap) => setValue({ facts: (snap.data()?.facts as string) ?? "", updatedBy: snap.data()?.updatedBy as string | undefined }),
+        () => setValue({ facts: "" }),
+      ),
+    [],
+  );
+  return value;
+}
+
+export async function saveBranchFacts(facts: string, by: string) {
+  await setDoc(doc(db, "settings", "branch"), { facts: facts.trim().slice(0, 3000), updatedBy: by, updatedAt: serverTimestamp() });
+}
+
+export async function readBranchFacts() {
+  return ((await getDoc(doc(db, "settings", "branch"))).data()?.facts as string) ?? "";
 }
