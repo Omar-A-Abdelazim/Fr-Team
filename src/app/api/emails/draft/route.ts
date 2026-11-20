@@ -123,20 +123,26 @@ async function handle(req: Request) {
     "researchSummary is 2 to 4 sentences on what you found, and says so plainly if you found little.",
   ].join("\n");
 
-  let res: Response;
-  try {
-    res = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        tools: [{ google_search: {} }],
-      }),
-      signal: AbortSignal.timeout(55_000),
-    });
-  } catch {
-    return json({ error: "Couldn't reach Gemini. Try again." }, 502);
+  // Google retires model names over time; try the configured one, then the rolling "latest" alias.
+  const models = [process.env.GEMINI_MODEL || "gemini-3.8-flash", "gemini-flash-latest"];
+  let res: Response | null = null;
+  for (const model of models) {
+    try {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          tools: [{ google_search: {} }],
+        }),
+        signal: AbortSignal.timeout(55_000),
+      });
+    } catch {
+      return json({ error: "Couldn't reach Gemini. Try again." }, 502);
+    }
+    if (res.status !== 404) break;
   }
+  if (!res) return json({ error: "Couldn't reach Gemini. Try again." }, 502);
   if (!res.ok) {
     const detail = await res
       .json()
