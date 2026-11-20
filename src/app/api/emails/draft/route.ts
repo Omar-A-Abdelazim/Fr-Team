@@ -123,24 +123,39 @@ async function handle(req: Request) {
     "researchSummary is 2 to 4 sentences on what you found, and says so plainly if you found little.",
   ].join("\n");
 
-  // Google retires model names over time; try the configured one, then the rolling "latest" alias.
-  const models = [process.env.GEMINI_MODEL || "gemini-3.8-flash", "gemini-flash-latest"];
+  // Google retires model names and the free tier often has no quota for Search grounding.
+  // Try: configured model with search → same model without search → lighter model without search.
+  const main = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+  const attempts: { model: string; search: boolean }[] = [
+    { model: main, search: true },
+    { model: "gemini-flash-latest", search: true },
+    { model: main, search: false },
+    { model: "gemini-flash-lite-latest", search: false },
+  ];
   let res: Response | null = null;
-  for (const model of models) {
+  let usedSearch = true;
+  for (const a of attempts) {
     try {
-      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${a.model}:generateContent`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          tools: [{ google_search: {} }],
+          contents: [{ role: "user", parts: [{ text: a.search ? prompt : prompt.replace("Use Google Search to research", "From what you already know, describe") }] }],
+          ...(a.search ? { tools: [{ google_search: {} }] } : {}),
         }),
         signal: AbortSignal.timeout(55_000),
       });
     } catch {
       return json({ error: "Couldn't reach Gemini. Try again." }, 502);
     }
-    if (res.status !== 404) break;
+    usedSearch = a.search;
+    if (res.status !== 404 && res.status !== 429) break;
+  }
+  if (res && res.status === 429) {
+    return json(
+      { error: "Gemini's free quota is used up for now. Wait a minute and try again, or turn on billing in Google AI Studio." },
+      429,
+    );
   }
   if (!res) return json({ error: "Couldn't reach Gemini. Try again." }, 502);
   if (!res.ok) {
@@ -182,6 +197,11 @@ async function handle(req: Request) {
   return json({
     subject: parsed.subject,
     body: parsed.body,
-    research: { summary: parsed.researchSummary, sources },
+    research: {
+      summary: usedSearch
+        ? parsed.researchSummary
+        : `Written without a live web search (free quota limit), so double-check any facts. ${parsed.researchSummary}`.trim(),
+      sources,
+    },
   });
 }
