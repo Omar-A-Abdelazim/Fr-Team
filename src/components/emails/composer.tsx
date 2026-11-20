@@ -25,7 +25,7 @@ import {
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { upload } from "@vercel/blob/client";
+import { upload, uploadPresigned } from "@vercel/blob/client";
 import { toast } from "sonner";
 import { auth } from "@/lib/firebase/client";
 import { setStatus, useSponsors } from "@/lib/firebase/data";
@@ -253,15 +253,15 @@ export function EmailComposer() {
 
   // ---- attachments ------------------------------------------------------
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [blob, setBlob] = useState<{ enabled: boolean; maxBytes: number } | null>(null);
+  const [blob, setBlob] = useState<{ enabled: boolean; maxBytes: number; mode?: "token" | "presigned" } | null>(null);
   const [attachError, setAttachError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     fetch("/api/blob/upload")
       .then((r) => r.json())
-      .then((d: { enabled?: boolean; maxBytes?: number }) => {
-        if (!cancelled) setBlob({ enabled: !!d.enabled, maxBytes: d.maxBytes || BLOB_MAX_DEFAULT });
+      .then((d: { enabled?: boolean; maxBytes?: number; mode?: "token" | "presigned" }) => {
+        if (!cancelled) setBlob({ enabled: !!d.enabled, maxBytes: d.maxBytes || BLOB_MAX_DEFAULT, mode: d.mode });
       })
       .catch(() => {
         if (!cancelled) setBlob({ enabled: false, maxBytes: BLOB_MAX_DEFAULT });
@@ -301,7 +301,8 @@ export function EmailComposer() {
         if (blob.enabled) {
           const token = await auth.currentUser?.getIdToken();
           if (!token) throw new Error("Sign in again to upload.");
-          const res = await upload(f.name, f, {
+          const send = blob.mode === "presigned" ? uploadPresigned : upload;
+          const res = await send(f.name, f, {
             access: "public",
             handleUploadUrl: "/api/blob/upload",
             clientPayload: token,
