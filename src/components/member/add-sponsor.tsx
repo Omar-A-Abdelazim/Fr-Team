@@ -1,8 +1,10 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, X } from "lucide-react";
+import { AlertTriangle, Loader2, Sparkles, X } from "lucide-react";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
+import { auth } from "@/lib/firebase/client";
 import { PARTNER_TYPES, TYPE_COLOR } from "@/lib/constants";
 import { findDuplicate } from "@/lib/duplicates";
 import type { PartnerType, Sponsor } from "@/types";
@@ -22,6 +24,56 @@ const EMPTY: Draft = {
 };
 
 const STEPS = ["Company", "Contacts", "Context"] as const;
+
+export type SaveFlag = { matchId?: string | null; matchName?: string | null; reason: string; byAi: boolean };
+type AiMatch = { matchId: string | null; matchName: string; matchOwner: string; reason: string };
+
+/** Asks the server to compare the new entry with every logged sponsor. Returns null when the check can't run. */
+async function checkDuplicate(d: Draft): Promise<{ duplicate: boolean; match?: AiMatch } | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 25000);
+  try {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) return null;
+    const res = await fetch("/api/sponsors/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        name: d.name,
+        partnerType: d.partnerType,
+        email: d.email,
+        phone: d.phone,
+        website: d.website,
+        facebook: d.facebook,
+        linkedin: d.linkedin,
+        description: d.description,
+      }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      duplicate?: boolean;
+      matchId?: string | null;
+      matchName?: string;
+      matchOwner?: string;
+      reason?: string;
+    };
+    if (!data.duplicate) return { duplicate: false };
+    return {
+      duplicate: true,
+      match: {
+        matchId: data.matchId ?? null,
+        matchName: data.matchName ?? "another entry",
+        matchOwner: data.matchOwner ?? "a teammate",
+        reason: data.reason ?? "It looks like the same company.",
+      },
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function Input({
   label,
@@ -61,13 +113,15 @@ export function AddSponsor({
 }: {
   open: boolean;
   onClose: () => void;
-  onSave: (d: Draft, possibleDuplicate: boolean) => Promise<boolean>;
+  onSave: (d: Draft, possibleDuplicate: boolean, flag?: SaveFlag | null) => Promise<boolean>;
   pool: Sponsor[];
 }) {
   const [d, setD] = useState<Draft>(EMPTY);
   const [step, setStep] = useState(0);
   const [ignored, setIgnored] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [aiMatch, setAiMatch] = useState<AiMatch | null>(null);
   const set = <K extends keyof Draft>(k: K) => (v: Draft[K]) => setD((p) => ({ ...p, [k]: v }));
 
   const dup = useMemo(() => findDuplicate(d, pool), [d, pool]);
@@ -80,8 +134,31 @@ export function AddSponsor({
       setD(EMPTY);
       setStep(0);
       setIgnored(null);
+      setAiMatch(null);
     }, 200);
   }
+
+  const clientFlag: SaveFlag = { reason: "Similar to an existing entry", byAi: false };
+
+  async function save(possibleDuplicate: boolean, flag: SaveFlag | null) {
+    setSaving(true);
+    const ok = await onSave(d, possibleDuplicate, flag);
+    setSaving(false);
+    if (ok) close();
+  }
+
+  async function submit() {
+    setAiMatch(null);
+    setChecking(true);
+    const result = await checkDuplicate(d);
+    setChecking(false);
+    if (result?.duplicate && result.match) return setAiMatch(result.match);
+    if (!result) toast("Couldn't run the AI duplicate check; saved normally.");
+    // The member overrode the instant warning, so an admin still reviews it.
+    return save(!!dup, dup ? clientFlag : null);
+  }
+
+  const busy = saving || checking;
 
   const canNext = step === 0 ? d.name.trim().length > 1 && !exactDup : true;
 
@@ -193,7 +270,49 @@ export function AddSponsor({
               </AnimatePresence>
 
               <AnimatePresence>
-                {showDup && dup && (
+                {aiMatch && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8 }}
+                    transition={{ duration: 0.2 }}
+                    className="mt-6 rounded-2xl border border-amber/40 bg-amber/10 p-4"
+                    role="alert"
+                  >
+                    <div className="flex gap-3">
+                      <Sparkles className="mt-0.5 size-5 shrink-0 text-amber" />
+                      <div className="min-w-0 text-sm">
+                        <p className="font-semibold">
+                          Looks like {aiMatch.matchName} (logged by {aiMatch.matchOwner})
+                        </p>
+                        <p className="mt-0.5 text-muted">{aiMatch.reason}</p>
+                        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                          <button
+                            type="button"
+                            onClick={close}
+                            className="h-11 rounded-xl border border-line px-4 font-semibold hover:bg-fg/5"
+                          >
+                            Don&apos;t save
+                          </button>
+                          <button
+                            type="button"
+                            disabled={saving}
+                            onClick={() =>
+                              save(true, { matchId: aiMatch.matchId, matchName: aiMatch.matchName, reason: aiMatch.reason, byAi: true })
+                            }
+                            className="h-11 rounded-xl bg-amber px-4 font-semibold text-[#071a33] disabled:opacity-40"
+                          >
+                            {saving ? "Saving…" : "Save for admin review"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <AnimatePresence>
+                {showDup && dup && !aiMatch && (
                   <motion.div
                     initial={{ opacity: 0, y: 8, scale: 0.98 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -245,17 +364,28 @@ export function AddSponsor({
               )}
               <button
                 type="button"
-                disabled={!canNext || saving}
-                onClick={async () => {
+                disabled={!canNext || busy || !!aiMatch}
+                onClick={() => {
                   if (step < STEPS.length - 1) return setStep((s) => s + 1);
-                  setSaving(true);
-                  const ok = await onSave(d, !!dup);
-                  setSaving(false);
-                  if (ok) close();
+                  void submit();
                 }}
-                className="h-11 flex-1 rounded-xl bg-gold font-semibold text-[#071a33] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-gold font-semibold text-[#071a33] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {step < STEPS.length - 1 ? "Next" : saving ? "Saving…" : "Save sponsor"}
+                {checking ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" aria-hidden />
+                    <span role="status">Checking for duplicates with AI…</span>
+                    <motion.span aria-hidden animate={{ rotate: 360 }} transition={{ duration: 2, ease: "linear", repeat: Infinity }}>
+                      <Sparkles className="size-4" />
+                    </motion.span>
+                  </>
+                ) : step < STEPS.length - 1 ? (
+                  "Next"
+                ) : saving ? (
+                  "Saving…"
+                ) : (
+                  "Save sponsor"
+                )}
               </button>
             </footer>
           </motion.aside>

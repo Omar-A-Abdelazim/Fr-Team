@@ -43,6 +43,8 @@ export type Sponsor = {
   approved: boolean;
   points: number;
   reviewed?: boolean;
+  /** Why this entry is waiting for an admin: the likely duplicate and the reason. */
+  duplicateFlag?: { matchId?: string | null; matchName?: string | null; reason: string; byAi: boolean } | null;
   createdAt?: string;
   updatedAt: string;
 };

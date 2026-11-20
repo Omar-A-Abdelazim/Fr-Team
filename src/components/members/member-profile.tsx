@@ -12,9 +12,9 @@ import { CountUp } from "@/components/motion/count-up";
 import { SummaryPanel } from "@/components/pages/refusal-summary";
 import { EmailPanel } from "@/components/sent/email-panel";
 import { formatSent } from "@/components/sent/meta";
-import { EmailsTable } from "@/components/tables/emails-table";
+import { EmailsTable, buildRows } from "@/components/tables/emails-table";
 import { REFUSAL_LABELS, STATUS_META, TYPE_COLOR } from "@/lib/constants";
-import { useMembers, useMyEmails, useSponsors, linkEmails, type EmailLog } from "@/lib/firebase/data";
+import { useMembers, useMyEmails, useSponsors, linkEmails } from "@/lib/firebase/data";
 import type { Sponsor, SponsorStatus } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -83,7 +83,7 @@ export function MemberProfile() {
     [mine],
   );
   const rows = mine.filter((s) => inGroup(s, group));
-  const open: EmailLog | null = emails.find((e) => e.id === openId) ?? null;
+  const open = useMemo(() => (openId ? (buildRows(emails, sponsors, uid).find((r) => r.key === openId) ?? null) : null), [openId, emails, sponsors, uid]);
   const first = member?.name.split(" ")[0] || "This member";
 
   const back = (
@@ -258,7 +258,7 @@ export function MemberProfile() {
             (emails.length === 0 && mine.length === 0 ? (
               <p className="rounded-3xl border border-dashed border-line p-10 text-center text-muted">{first} hasn&apos;t logged any sponsors or sent emails yet.</p>
             ) : (
-              <EmailsTable readOnly ownerId={uid} emails={emails} sponsors={sponsors} onOpen={(e) => setOpenId(e.id)} />
+              <EmailsTable readOnly ownerId={uid} emails={emails} sponsors={sponsors} onOpen={(r) => setOpenId(r.key)} />
             ))}
 
           {tab === "refusals" && (
@@ -294,12 +294,11 @@ export function MemberProfile() {
 
       <EmailPanel
         readOnly
-        email={open}
-        sponsor={open ? (sponsors.find((s) => s.id === open.sponsorId) ?? null) : null}
+        row={open}
         busy={false}
         suspended={false}
         onClose={() => setOpenId(null)}
-        onChange={() => {}}
+        onReply={() => {}}
         onRefuse={() => {}}
       />
     </div>

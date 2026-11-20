@@ -257,16 +257,20 @@ export function Workspace() {
         open={adding}
         onClose={() => setAdding(false)}
         pool={sponsors}
-        onSave={async (d, possibleDuplicate) => {
+        onSave={async (d, possibleDuplicate, flag) => {
           try {
-            await createSponsor(d, { id: me.id, name: me.name }, possibleDuplicate);
+            await createSponsor(d, { id: me.id, name: me.name }, possibleDuplicate, flag);
             setScope("mine");
             setFilter("all");
-            toast.success(possibleDuplicate ? `${d.name} logged` : `${d.name} logged, +${POINTS[d.partnerType]} points`, {
-              description: possibleDuplicate
-                ? "It looked like another entry, so an admin will check it before points are added."
-                : "It shows up for the whole team now.",
-            });
+            if (possibleDuplicate && flag?.byAi) {
+              toast.success("Saved. An admin will check it before points are added.");
+            } else {
+              toast.success(possibleDuplicate ? `${d.name} logged` : `${d.name} logged, +${POINTS[d.partnerType]} points`, {
+                description: possibleDuplicate
+                  ? "It looked like another entry, so an admin will check it before points are added."
+                  : "It shows up for the whole team now.",
+              });
+            }
             return true;
           } catch (e) {
             toast.error(e instanceof Error ? e.message : "Couldn't save. Try again.");

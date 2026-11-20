@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { setEmailRefusal, setEmailReply, setStatus, type EmailLog, type EmailReply } from "@/lib/firebase/data";
 import { REFUSAL_LABELS } from "@/lib/constants";
 import type { Refusal, Sponsor } from "@/types";
+import type { RowActions, SheetRow } from "@/components/tables/emails-table";
 
 export const REPLY_LABEL: Record<EmailReply, string> = {
   waiting: "Waiting",
@@ -110,4 +111,21 @@ function why(e: unknown) {
   if (code === "permission-denied") return "The database rules are out of date. The FR Head needs to publish the latest Firestore rules.";
   if (code === "unavailable") return "Can't reach the server. Check your connection and try again.";
   return (e as Error)?.message?.slice(0, 160) || "Try again.";
+}
+
+/** Row-level actions for the sheet and the Open panel: routes to the email or, for unsent sponsors, the sponsor. */
+export function useRowActions(ownerId: string | undefined, sponsors: Sponsor[]): RowActions {
+  const { busy, change, refuse, changeSponsor, refuseSponsor } = useEmailActions(ownerId, sponsors);
+  const setReply = useCallback(
+    (row: SheetRow, reply: EmailReply) => {
+      if (row.email) void change(row.email, reply);
+      else if (row.sponsor) void changeSponsor(row.sponsor, reply, false);
+    },
+    [change, changeSponsor],
+  );
+  const saveRefusal = useCallback(
+    async (row: SheetRow, r: Refusal) => (row.email ? refuse(row.email, r) : row.sponsor ? refuseSponsor(row.sponsor, r) : false),
+    [refuse, refuseSponsor],
+  );
+  return { busy, setReply, saveRefusal };
 }

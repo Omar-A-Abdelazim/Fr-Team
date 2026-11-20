@@ -1,5 +1,5 @@
 import { getCaller, isFail, json } from "@/lib/server/auth";
-import { gemini, parseJson } from "@/lib/server/gemini";
+import { ask, parseJson } from "@/lib/server/ai";
 
 export const maxDuration = 60;
 
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
       '{"summary": string (2-3 sentences), "topReasons": [{"reason": string, "share": number 0-100, "examples": [string, up to 2 short quotes or paraphrases]}] (max 5, shares roughly add to 100), "rootCauses": [string] (max 4: where the pitch breaks), "coaching": [{"member": string, "note": string}], "actions": [string] (max 5 concrete changes for the next outreach round)}',
     ].join("\n");
 
-    const r = await gemini(prompt);
+    const r = await ask(prompt);
     if (!r.ok) return json({ error: r.error }, r.status);
     const s = parseJson<Summary>(r.text);
     if (!s || typeof s.summary !== "string") return json({ error: "The AI didn't return a usable summary. Try again." }, 502);

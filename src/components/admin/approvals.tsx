@@ -75,6 +75,7 @@ export function ApprovalQueue({ sponsors, limit = 5 }: { sponsors: Sponsor[]; li
                     <span className="font-semibold text-amber">Possible duplicate, no points yet</span>
                   )}
                 </div>
+                {s.duplicateFlag && <DuplicateNote s={s} all={sponsors} />}
               </div>
               <div className="flex gap-2">
                 <motion.button
@@ -111,5 +112,22 @@ export function ApprovalQueue({ sponsors, limit = 5 }: { sponsors: Sponsor[]; li
         </motion.div>
       )}
     </section>
+  );
+}
+
+function DuplicateNote({ s, all }: { s: Sponsor; all: Sponsor[] }) {
+  const f = s.duplicateFlag!;
+  const match = f.matchId ? all.find((x) => x.id === f.matchId) : undefined;
+  const name = match?.name ?? f.matchName;
+  return (
+    <div className="mt-2 rounded-xl border border-amber/40 bg-amber/10 px-3 py-2 text-xs">
+      <p className="text-fg">{f.byAi ? `AI: ${f.reason}` : f.matchName ? `Similar to ${f.matchName}` : f.reason}</p>
+      {name && (
+        <p className="mt-0.5 text-muted">
+          Matches {name}
+          {match ? `, logged by ${match.ownerName}` : ""}
+        </p>
+      )}
+    </div>
   );
 }

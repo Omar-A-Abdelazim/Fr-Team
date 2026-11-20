@@ -2,17 +2,19 @@
 
 import { motion, useReducedMotion } from "framer-motion";
 import Link from "next/link";
+import { Building2, CheckCircle2, Clock, Send, XCircle, type LucideIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Envelope, Spark } from "@/components/auth/shapes";
 import { CountUp } from "@/components/motion/count-up";
 import { EmailPanel } from "@/components/sent/email-panel";
 import { REPLY_META } from "@/components/sent/meta";
-import { EmailsTable, buildRows } from "@/components/tables/emails-table";
-import { useEmailActions } from "@/components/tables/use-email-actions";
+import { EmailsTable, buildRows, type SheetView } from "@/components/tables/emails-table";
+import { useRowActions } from "@/components/tables/use-email-actions";
 import { useAuth } from "@/lib/firebase/auth-context";
 import { useMyEmails, useSponsors, linkEmails } from "@/lib/firebase/data";
+import { cn } from "@/lib/utils";
 
-type Tile = { key: string; label: string; color: string; value: number };
+type Tile = { key: string; label: string; color: string; value: number; icon: LucideIcon; view: SheetView; hint: string };
 
 export function MyEmails() {
   const { profile } = useAuth();
@@ -20,39 +22,59 @@ export function MyEmails() {
   const { emails: rawEmails, loading } = useMyEmails(uid);
   const { sponsors } = useSponsors();
   const emails = useMemo(() => linkEmails(rawEmails, sponsors), [rawEmails, sponsors]);
-  const [openId, setOpenId] = useState<string | null>(null);
-  const { busy, change, refuse } = useEmailActions(uid, sponsors);
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [view, setView] = useState<SheetView>({ scope: "all", filter: "all" });
+  const actions = useRowActions(uid, sponsors);
 
+  const rows = useMemo(() => (uid ? buildRows(emails, sponsors, uid) : []), [emails, sponsors, uid]);
   const tiles = useMemo<Tile[]>(() => {
-    const rows = uid ? buildRows(emails, sponsors, uid) : [];
     const emailed = rows.filter((r) => r.email).length;
     return [
-      { key: "sponsors", label: "Sponsors", color: "var(--fg)", value: rows.filter((r) => r.sponsor).length },
-      { key: "emailed", label: "Emailed", color: REPLY_META.replied.color, value: emailed },
-      { key: "not", label: "Not emailed yet", color: REPLY_META.waiting.color, value: rows.length - emailed },
-      { key: "agreed", label: "Agreed", color: REPLY_META.accepted.color, value: rows.filter((r) => r.reply === "accepted").length },
-      { key: "no", label: "Said no", color: REPLY_META.refused.color, value: rows.filter((r) => r.reply === "refused").length },
+      { key: "sponsors", label: "Sponsors", color: "var(--fg)", icon: Building2, value: rows.length, view: { scope: "all", filter: "all" }, hint: "Show all sponsors" },
+      { key: "emailed", label: "Emailed", color: REPLY_META.replied.color, icon: Send, value: emailed, view: { scope: "emailed", filter: "all" }, hint: "Show emailed sponsors" },
+      { key: "not", label: "Not emailed yet", color: REPLY_META.waiting.color, icon: Clock, value: rows.length - emailed, view: { scope: "not_emailed", filter: "all" }, hint: "Show sponsors not emailed yet" },
+      { key: "agreed", label: "Agreed", color: REPLY_META.accepted.color, icon: CheckCircle2, value: rows.filter((r) => r.reply === "accepted").length, view: { scope: "all", filter: "accepted" }, hint: "Show sponsors who agreed" },
+      { key: "no", label: "Said no", color: REPLY_META.refused.color, icon: XCircle, value: rows.filter((r) => r.reply === "refused").length, view: { scope: "all", filter: "refused" }, hint: "Show sponsors who said no" },
     ];
-  }, [emails, sponsors, uid]);
-  const open = emails.find((e) => e.id === openId) ?? null;
+  }, [rows]);
+  const open = rows.find((r) => r.key === openKey) ?? null;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+      <header className="space-y-5">
         <div>
           <h1 className="font-display text-3xl font-bold sm:text-4xl">My emails</h1>
-          <p className="mt-1.5 max-w-md text-muted">Every sponsor you logged, sent or not. Update each one when they reply.</p>
+          <p className="mt-1.5 max-w-xl text-muted">Every sponsor you logged, sent or not. Update each one when they reply.</p>
         </div>
-        <dl className="grid grid-cols-3 gap-2 sm:grid-cols-5 sm:gap-3 lg:w-[34rem]">
-          {tiles.map((t) => (
-            <div key={t.key} className="rounded-2xl border border-line bg-raised px-2.5 py-3 sm:px-4">
-              <dd className="font-display text-2xl font-extrabold leading-none sm:text-3xl" style={{ color: t.color }}>
-                {loading ? <span className="inline-block h-6 w-6 animate-pulse rounded bg-fg/10" /> : <CountUp to={t.value} duration={0.9} />}
-              </dd>
-              <dt className="mt-1.5 truncate text-xs font-medium text-muted sm:text-sm">{t.label}</dt>
-            </div>
-          ))}
-        </dl>
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">
+          {tiles.map((t) => {
+            const active = view.scope === t.view.scope && view.filter === t.view.filter;
+            const Icon = t.icon;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                aria-pressed={active}
+                aria-label={`${t.label}: ${t.value}. ${t.hint}`}
+                onClick={() => setView(t.view)}
+                className={cn(
+                  "flex items-center gap-3 rounded-2xl border bg-raised p-3.5 text-left transition-[border-color,box-shadow,background-color] duration-150 hover:bg-fg/[0.03] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky",
+                  active ? "border-sky ring-2 ring-sky/40" : "border-line",
+                )}
+              >
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl" style={{ background: `color-mix(in srgb, ${t.color} 14%, transparent)`, color: t.color }}>
+                  <Icon aria-hidden className="size-5" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-display text-2xl font-extrabold leading-none tabular-nums">
+                    {loading ? <span className="inline-block h-6 w-8 animate-pulse rounded bg-fg/10" /> : <CountUp to={t.value} duration={0.9} />}
+                  </span>
+                  <span className="mt-1 block truncate text-xs font-medium text-muted">{t.label}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </header>
 
       {loading || !uid ? (
@@ -60,17 +82,16 @@ export function MyEmails() {
       ) : emails.length === 0 && !sponsors.some((s) => s.ownerId === uid) ? (
         <EmptyState />
       ) : (
-        <EmailsTable emails={emails} sponsors={sponsors} ownerId={uid} onOpen={(e) => setOpenId(e.id)} />
+        <EmailsTable emails={emails} sponsors={sponsors} ownerId={uid} actions={actions} view={view} onViewChange={setView} onOpen={(r) => setOpenKey(r.key)} />
       )}
 
       <EmailPanel
-        email={open}
-        sponsor={open ? (sponsors.find((s) => s.id === open.sponsorId) ?? null) : null}
-        busy={busy}
+        row={open}
+        busy={actions.busy}
         suspended={false}
-        onClose={() => setOpenId(null)}
-        onChange={change}
-        onRefuse={(e, r) => void refuse(e, r)}
+        onClose={() => setOpenKey(null)}
+        onReply={actions.setReply}
+        onRefuse={(r, x) => void actions.saveRefusal(r, x)}
       />
     </div>
   );

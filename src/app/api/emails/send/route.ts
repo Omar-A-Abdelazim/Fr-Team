@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 import { FIRESTORE, getCaller, isFail, json } from "@/lib/server/auth";
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DAILY_LIMIT = Number(process.env.MAIL_DAILY_LIMIT) || 50;
@@ -59,6 +59,36 @@ export async function POST(req: Request) {
     if (!subject || subject.length > 200) return json({ error: "Add a subject (up to 200 characters)." }, 400);
     if (!text || text.length > 20000) return json({ error: "The email body is empty or too long." }, 400);
 
+    // Attachments: either files already uploaded to Vercel Blob (any size up to Gmail's limit)
+    // or small files sent inline as base64 (server functions accept ~4.5 MB per request).
+    type Att = { filename: string; path?: string; content?: string; encoding?: "base64"; contentType?: string };
+    const attachments: Att[] = [];
+    const rawAtt = Array.isArray(b.attachments) ? b.attachments.slice(0, 5) : [];
+    for (const a of rawAtt) {
+      const o = (a ?? {}) as Record<string, unknown>;
+      const filename = typeof o.filename === "string" ? o.filename.replace(/[\\/\r\n]/g, "_").slice(0, 120) : "";
+      if (!filename) continue;
+      if (typeof o.url === "string") {
+        let u: URL;
+        try {
+          u = new URL(o.url);
+        } catch {
+          return json({ error: `The file ${filename} has a bad link.` }, 400);
+        }
+        if (u.protocol !== "https:" || !u.hostname.endsWith(".blob.vercel-storage.com")) {
+          return json({ error: `The file ${filename} must be uploaded through FR Hub.` }, 400);
+        }
+        attachments.push({ filename, path: u.toString() });
+      } else if (typeof o.base64 === "string") {
+        attachments.push({
+          filename,
+          content: o.base64,
+          encoding: "base64",
+          contentType: typeof o.contentType === "string" ? o.contentType.slice(0, 100) : undefined,
+        });
+      }
+    }
+
     // Members can only email sponsors they logged themselves.
     if (!sponsorId) return json({ error: "Pick one of your own sponsors to email." }, 400);
     const sp = await fetch(`${FIRESTORE}/sponsors/${encodeURIComponent(sponsorId)}`, {
@@ -89,6 +119,7 @@ export async function POST(req: Request) {
         bcc: me.email || undefined, // sender keeps a copy in their own inbox
         subject,
         text,
+        attachments,
       });
       messageId = info.messageId ?? "";
     } catch (e) {
@@ -112,6 +143,7 @@ export async function POST(req: Request) {
           sponsorId: { stringValue: sponsorId },
           subject: { stringValue: subject },
           body: { stringValue: text },
+          attachments: { arrayValue: { values: attachments.map((a) => ({ stringValue: a.filename })) } },
           reply: { stringValue: "waiting" },
           day: { stringValue: day },
           sentAt: { timestampValue: new Date().toISOString() },

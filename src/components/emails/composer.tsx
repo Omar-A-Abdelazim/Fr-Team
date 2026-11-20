@@ -7,7 +7,13 @@ import {
   ChevronDown,
   Copy,
   ExternalLink,
+  File as FileIcon,
+  FileImage,
+  FileText,
   Mail,
+  Paperclip,
+  UploadCloud,
+  X,
   Loader2,
   Plus,
   RefreshCw,
@@ -19,6 +25,7 @@ import {
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { upload } from "@vercel/blob/client";
 import { toast } from "sonner";
 import { auth } from "@/lib/firebase/client";
 import { setStatus, useSponsors } from "@/lib/firebase/data";
@@ -44,6 +51,101 @@ type Draft = {
   approved: boolean;
   error: string;
 };
+
+const ACCEPT = ".pdf,.ppt,.pptx,.doc,.docx,.png,.jpg,.jpeg";
+const ACCEPT_RE = /\.(pdf|pptx?|docx?|png|jpe?g)$/i;
+const MB = 1024 * 1024;
+const INLINE_MAX = 3 * MB;
+const BLOB_MAX_DEFAULT = 20 * MB;
+
+type Attachment = {
+  id: string;
+  filename: string;
+  size: number;
+  progress: number;
+  status: "uploading" | "done" | "failed";
+  error?: string;
+  url?: string;
+  base64?: string;
+  contentType?: string;
+};
+
+const fmtSize = (n: number) => (n >= MB ? `${(n / MB).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+function mimeOf(name: string, fallback: string) {
+  if (fallback) return fallback;
+  const e = name.split(".").pop()?.toLowerCase();
+  const map: Record<string, string> = {
+    pdf: "application/pdf",
+    ppt: "application/vnd.ms-powerpoint",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+  };
+  return map[e ?? ""] ?? "application/octet-stream";
+}
+
+function readBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
+    r.onerror = () => reject(new Error("Couldn't read the file."));
+    r.readAsDataURL(file);
+  });
+}
+
+function attachmentPayload(list: Attachment[]) {
+  return list
+    .filter((a) => a.status === "done")
+    .map((a) => (a.url ? { filename: a.filename, url: a.url } : { filename: a.filename, base64: a.base64, contentType: a.contentType }));
+}
+
+function FileGlyph({ name, className }: { name: string; className?: string }) {
+  if (/\.(png|jpe?g)$/i.test(name)) return <FileImage className={className} aria-hidden />;
+  if (/\.(pdf|docx?|pptx?)$/i.test(name)) return <FileText className={className} aria-hidden />;
+  return <FileIcon className={className} aria-hidden />;
+}
+
+function AttachmentChip({ a, onRemove }: { a: Attachment; onRemove?: () => void }) {
+  return (
+    <li className="rounded-xl border border-line bg-bg px-3 py-2">
+      <div className="flex items-center gap-3">
+        <FileGlyph name={a.filename} className="size-5 shrink-0 text-sky" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{a.filename}</p>
+          <p className={cn("text-xs", a.status === "failed" ? "text-coral" : "text-muted")}>
+            {a.status === "failed" ? a.error || "Upload failed." : a.status === "uploading" ? `Uploading ${Math.round(a.progress)}%` : fmtSize(a.size)}
+          </p>
+        </div>
+        {onRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="grid size-10 shrink-0 place-items-center rounded-lg text-muted hover:bg-fg/5 hover:text-coral focus-visible:outline-2 focus-visible:outline-sky"
+          >
+            <X className="size-4" aria-hidden />
+            <span className="sr-only">Remove {a.filename}</span>
+          </button>
+        )}
+      </div>
+      {a.status === "uploading" && (
+        <div
+          role="progressbar"
+          aria-label={`Uploading ${a.filename}`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(a.progress)}
+          className="mt-2 h-1.5 overflow-hidden rounded-full bg-line"
+        >
+          <div className="h-full rounded-full bg-gradient-to-r from-sky to-gold transition-[width] duration-200" style={{ width: `${a.progress}%` }} />
+        </div>
+      )}
+    </li>
+  );
+}
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const blankDraft = (status: Status = "waiting"): Draft => ({
@@ -149,6 +251,80 @@ export function EmailComposer() {
 
   const [session, setSession] = useState(0);
 
+  // ---- attachments ------------------------------------------------------
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [blob, setBlob] = useState<{ enabled: boolean; maxBytes: number } | null>(null);
+  const [attachError, setAttachError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/blob/upload")
+      .then((r) => r.json())
+      .then((d: { enabled?: boolean; maxBytes?: number }) => {
+        if (!cancelled) setBlob({ enabled: !!d.enabled, maxBytes: d.maxBytes || BLOB_MAX_DEFAULT });
+      })
+      .catch(() => {
+        if (!cancelled) setBlob({ enabled: false, maxBytes: BLOB_MAX_DEFAULT });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const patchAtt = (id: string, p: Partial<Attachment>) => setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, ...p } : a)));
+
+  async function addFiles(list: FileList | File[]) {
+    const files = Array.from(list);
+    if (files.length === 0 || !blob) return;
+    const limit = blob.enabled ? Math.min(blob.maxBytes, 20 * MB) : INLINE_MAX;
+    let total = attachments.reduce((n, a) => n + a.size, 0);
+    const accepted: File[] = [];
+    let err = "";
+    for (const f of files) {
+      if (!ACCEPT_RE.test(f.name)) {
+        err = `${f.name} isn't a supported type. Use PDF, PowerPoint, Word or an image.`;
+        continue;
+      }
+      if (total + f.size > limit) {
+        err = `${f.name} is too big. Attachments can total ${blob.enabled ? "20 MB" : "3 MB"}; you have ${fmtSize(Math.max(0, limit - total))} left.`;
+        continue;
+      }
+      total += f.size;
+      accepted.push(f);
+    }
+    setAttachError(err);
+    for (const f of accepted) {
+      const id = uid();
+      const base: Attachment = { id, filename: f.name, size: f.size, progress: 0, status: "uploading" };
+      setAttachments((prev) => [...prev, base]);
+      try {
+        if (blob.enabled) {
+          const token = await auth.currentUser?.getIdToken();
+          if (!token) throw new Error("Sign in again to upload.");
+          const res = await upload(f.name, f, {
+            access: "public",
+            handleUploadUrl: "/api/blob/upload",
+            clientPayload: token,
+            onUploadProgress: (e) => patchAtt(id, { progress: e.percentage }),
+          });
+          patchAtt(id, { url: res.url, progress: 100, status: "done" });
+        } else {
+          const base64 = await readBase64(f);
+          patchAtt(id, { base64, contentType: mimeOf(f.name, f.type), progress: 100, status: "done" });
+        }
+      } catch (e) {
+        patchAtt(id, { status: "failed", error: e instanceof Error ? e.message : "Upload failed." });
+      }
+    }
+  }
+
+  const removeAttachment = (id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+    setAttachError("");
+  };
+  const readyAtt = attachments.filter((a) => a.status === "done");
+  const uploading = attachments.some((a) => a.status === "uploading");
+
   // Quick send: /app/emails?to=id1,id2 preselects the member's own sponsors that have an email.
   useEffect(() => {
     if (quickApplied.current || !toParam || !profile || sponsors.length === 0) return;
@@ -178,6 +354,8 @@ export function EmailComposer() {
     setRunning(false);
     setStarted(false);
     setQuickNote(0);
+    setAttachments([]);
+    setAttachError("");
     setSession((n) => n + 1);
   }, []);
 
@@ -188,7 +366,7 @@ export function EmailComposer() {
 
   function continueToDrafts() {
     setAttempted(true);
-    if (!setupOk) return;
+    if (!setupOk || uploading) return;
     const clean = validTargets.map((t) => ({ ...t, company: t.company.trim(), email: t.email.trim() }));
     setTargets(clean);
     setDrafts((prev) => Object.fromEntries(clean.map((t) => [t.id, prev[t.id] ?? blankDraft()])));
@@ -214,7 +392,8 @@ export function EmailComposer() {
         body: JSON.stringify({
           purpose: purpose.trim(),
           references: filledRefs,
-          target: { company: t.company, email: t.email, contactName: t.contactName, context: t.context },
+          target: { company: t.company, email: t.email, contactName: t.contactName, context: t.context, sponsorId: t.sponsorId },
+          hasAttachment: readyAtt.length > 0,
         }),
       });
       if (res.status === 503) {
@@ -320,6 +499,12 @@ export function EmailComposer() {
               attempted={attempted}
               errors={errors}
               onContinue={continueToDrafts}
+              attachments={attachments}
+              blob={blob}
+              attachError={attachError}
+              onAddFiles={addFiles}
+              onRemoveAttachment={removeAttachment}
+              uploading={uploading}
             />
           )}
           {step === 1 && (
@@ -338,7 +523,7 @@ export function EmailComposer() {
               onNext={() => go(2)}
             />
           )}
-          {step === 2 && <SendStep targets={approved} drafts={drafts} sponsors={sponsors} onBack={() => go(1)} onFinish={resetAll} />}
+          {step === 2 && <SendStep attachments={readyAtt} targets={approved} drafts={drafts} sponsors={sponsors} onBack={() => go(1)} onFinish={resetAll} />}
         </motion.div>
       </AnimatePresence>
     </div>
@@ -360,6 +545,12 @@ function SetupStep({
   attempted,
   errors,
   onContinue,
+  attachments,
+  blob,
+  attachError,
+  onAddFiles,
+  onRemoveAttachment,
+  uploading,
 }: {
   purpose: string;
   setPurpose: (v: string) => void;
@@ -371,6 +562,12 @@ function SetupStep({
   attempted: boolean;
   errors: { purpose: string; refs: string; targets: string };
   onContinue: () => void;
+  attachments: Attachment[];
+  blob: { enabled: boolean; maxBytes: number } | null;
+  attachError: string;
+  onAddFiles: (f: FileList | File[]) => void;
+  onRemoveAttachment: (id: string) => void;
+  uploading: boolean;
 }) {
   return (
     <div className="space-y-6">
@@ -445,18 +642,129 @@ function SetupStep({
         )}
       </section>
 
+      <AttachmentsSection
+        attachments={attachments}
+        blob={blob}
+        error={attachError}
+        onAddFiles={onAddFiles}
+        onRemove={onRemoveAttachment}
+      />
+
       <RecipientsSection targets={targets} setTargets={setTargets} sponsors={sponsors} attempted={attempted} error={errors.targets} />
 
       <div className="flex justify-end">
         <button
           type="button"
           onClick={onContinue}
-          className="h-11 w-full rounded-xl bg-gold px-6 font-semibold text-[#071a33] sm:w-auto"
+          disabled={uploading}
+          className="h-11 w-full rounded-xl bg-gold px-6 font-semibold text-[#071a33] transition-opacity disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
         >
-          Continue to drafts
+          {uploading ? "Uploading files…" : "Continue to drafts"}
         </button>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Attachments
+// ---------------------------------------------------------------------------
+
+function AttachmentsSection({
+  attachments,
+  blob,
+  error,
+  onAddFiles,
+  onRemove,
+}: {
+  attachments: Attachment[];
+  blob: { enabled: boolean; maxBytes: number } | null;
+  error: string;
+  onAddFiles: (f: FileList | File[]) => void;
+  onRemove: (id: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [over, setOver] = useState(false);
+  const ready = blob !== null;
+
+  return (
+    <section className="space-y-4 rounded-2xl border border-line bg-raised p-5 sm:p-6">
+      <div>
+        <h2 className="font-display text-lg font-bold">Attachments</h2>
+        <p className="text-sm text-muted">
+          {blob?.enabled
+            ? "Add your proposal or flyer. Up to 20 MB in total. It goes with every email."
+            : "Files up to 3 MB for now. The FR Head can turn on larger uploads."}
+        </p>
+      </div>
+
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setOver(false);
+          if (ready) onAddFiles(e.dataTransfer.files);
+        }}
+        className={cn(
+          "flex flex-col items-center gap-3 rounded-xl border border-dashed p-6 text-center transition-colors duration-150",
+          over ? "border-sky bg-sky/10" : "border-line",
+        )}
+      >
+        <UploadCloud className="size-7 text-sky" aria-hidden />
+        <p className="hidden text-sm text-muted sm:block">Drop files here</p>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          accept={ACCEPT}
+          className="sr-only"
+          tabIndex={-1}
+          aria-label="Choose files to attach"
+          onChange={(e) => {
+            if (e.target.files) onAddFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <button
+          type="button"
+          disabled={!ready}
+          onClick={() => inputRef.current?.click()}
+          className="inline-flex h-11 items-center gap-2 rounded-xl border border-line px-4 text-sm font-semibold hover:bg-fg/5 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Paperclip className="size-4" aria-hidden /> Add file
+        </button>
+        <p className="text-xs text-muted">PDF, PowerPoint, Word, PNG or JPG</p>
+      </div>
+
+      {error && (
+        <p role="alert" className="text-xs text-coral">
+          {error}
+        </p>
+      )}
+
+      {attachments.length > 0 && (
+        <ul className="space-y-2">
+          <AnimatePresence initial={false}>
+            {attachments.map((a) => (
+              <motion.div
+                key={a.id}
+                layout
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2, ease: EASE }}
+              >
+                <AttachmentChip a={a} onRemove={() => onRemove(a.id)} />
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -730,6 +1038,55 @@ function DraftsStep({
   );
 }
 
+const PROGRESS_STEPS = ["Reading their website…", "Searching recent news…", "Writing the email…"];
+
+function ProgressText({ company }: { company: string }) {
+  const reduce = useReducedMotion();
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setI((n) => Math.min(n + 1, PROGRESS_STEPS.length - 1)), 9000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div role="status" className="text-sm">
+      <p className="font-semibold">Researching {company}…</p>
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.p
+          key={i}
+          initial={reduce ? { opacity: 0 } : { opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2, ease: EASE }}
+          className="mt-0.5 text-muted"
+        >
+          {PROGRESS_STEPS[i]}
+        </motion.p>
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function ResearchRows({ summary }: { summary: string }) {
+  const lines = summary.split("\n").map((l) => l.trim()).filter(Boolean);
+  return (
+    <dl className="space-y-2">
+      {lines.map((line, i) => {
+        const m = line.match(/^([^:]{2,40}):\s*(.+)$/);
+        return m ? (
+          <div key={i}>
+            <dt className="inline font-semibold text-fg">{m[1]}: </dt>
+            <dd className="inline text-muted">{m[2]}</dd>
+          </div>
+        ) : (
+          <p key={i} className="text-muted">
+            {line}
+          </p>
+        );
+      })}
+    </dl>
+  );
+}
+
 const STATUS_LABEL: Record<Status, string> = {
   waiting: "Waiting",
   researching: "Researching",
@@ -810,10 +1167,13 @@ function DraftCard({
       )}
 
       {draft.status === "researching" && !draft.body && (
-        <div className="relative mt-4 space-y-2" aria-hidden>
-          <div className="h-3 w-3/4 rounded bg-line" />
-          <div className="h-3 w-full rounded bg-line" />
-          <div className="h-3 w-5/6 rounded bg-line" />
+        <div className="relative mt-4">
+          <ProgressText company={target.company} />
+          <div className="mt-3 space-y-2" aria-hidden>
+            <div className="h-3 w-3/4 rounded bg-line" />
+            <div className="h-3 w-full rounded bg-line" />
+            <div className="h-3 w-5/6 rounded bg-line" />
+          </div>
         </div>
       )}
 
@@ -844,7 +1204,7 @@ function DraftCard({
                     className="overflow-hidden"
                   >
                     <div className="space-y-3 border-t border-line px-4 py-3 text-sm">
-                      {draft.summary && <p className="text-muted">{draft.summary}</p>}
+                      {draft.summary && <ResearchRows summary={draft.summary} />}
                       {draft.sources.length > 0 && (
                         <ul className="space-y-1.5">
                           {draft.sources.map((s) => (
@@ -912,12 +1272,14 @@ type SendState = { status: "ready" | "sending" | "sent" | "failed"; error?: stri
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function SendStep({
+  attachments,
   targets,
   drafts,
   sponsors,
   onBack,
   onFinish,
 }: {
+  attachments: Attachment[];
   targets: Target[];
   drafts: Record<string, Draft>;
   sponsors: ReturnType<typeof useSponsors>["sponsors"];
@@ -952,7 +1314,7 @@ function SendStep({
       const res = await fetch("/api/emails/send", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ to: t.email, subject: d.subject, body: d.body, company: t.company, sponsorId: t.sponsorId }),
+        body: JSON.stringify({ to: t.email, subject: d.subject, body: d.body, company: t.company, sponsorId: t.sponsorId, attachments: attachmentPayload(attachments) }),
       });
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (res.status === 503) {
@@ -1039,6 +1401,17 @@ function SendStep({
         </div>
       ) : (
         <>
+          {attachments.length > 0 && (
+            <div className="rounded-2xl border border-line bg-raised p-4">
+              <p className="mb-2 text-sm font-semibold">Attached to every email</p>
+              <ul className="grid gap-2 sm:grid-cols-2">
+                {attachments.map((a) => (
+                  <AttachmentChip key={a.id} a={a} />
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted">
               {sentCount} of {targets.length} sent

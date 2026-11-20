@@ -80,10 +80,13 @@ export type NewSponsor = Pick<
 >;
 
 /** New sponsors are approved with points right away, unless the member overrode a possible-duplicate warning. */
+export type DuplicateFlag = { matchId?: string | null; matchName?: string | null; reason: string; byAi: boolean };
+
 export async function createSponsor(
   input: NewSponsor,
   owner: { id: string; name: string },
   possibleDuplicate = false,
+  flag?: DuplicateFlag | null,
 ) {
   const approved = !possibleDuplicate;
   const ref = doc(collection(db, "sponsors"));
@@ -97,6 +100,7 @@ export async function createSponsor(
     refusal: null,
     approved,
     reviewed: false,
+    duplicateFlag: possibleDuplicate && flag ? flag : null,
     points: approved ? POINTS[input.partnerType] : 0,
     statusHistory: [],
     createdAt: serverTimestamp(),
@@ -158,6 +162,7 @@ export type EmailLog = {
   body: string;
   reply: EmailReply;
   refusalCategory?: RefusalCategory | "";
+  attachments?: string[];
   sentAt: string;
 };
 

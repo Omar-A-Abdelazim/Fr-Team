@@ -1,9 +1,40 @@
-import { getCaller, isFail, json } from "@/lib/server/auth";
-import { gemini, parseJson } from "@/lib/server/gemini";
+import { FIRESTORE, getCaller, isFail, json } from "@/lib/server/auth";
+import { ask, parseJson, readWebsite } from "@/lib/server/ai";
+import { domainOf } from "@/lib/duplicates";
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const FREE_MAIL = /^(gmail|yahoo|hotmail|outlook|icloud|live)\./;
+
+type Brief = {
+  overview?: string;
+  offerings?: string;
+  market?: string;
+  momentum?: string;
+  needs?: string;
+  csr?: string;
+  angle?: string;
+  confidence?: string;
+};
+
+async function loadSponsor(id: string, token: string) {
+  if (!id) return null;
+  const res = await fetch(`${FIRESTORE}/sponsors/${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) return null;
+  const f = ((await res.json()) as { fields?: Record<string, { stringValue?: string }> }).fields ?? {};
+  const g = (k: string) => f[k]?.stringValue ?? "";
+  return {
+    ownerId: g("ownerId"),
+    name: g("name"),
+    partnerType: g("partnerType"),
+    website: g("website"),
+    email: g("email"),
+    facebook: g("facebook"),
+    linkedin: g("linkedin"),
+    description: g("description"),
+  };
+}
 
 export async function POST(req: Request) {
   try {
@@ -17,13 +48,7 @@ async function handle(req: Request) {
   const me = await getCaller(req);
   if (isFail(me)) return json({ error: me.error }, me.status);
 
-  let raw: unknown;
-  try {
-    raw = await req.json();
-  } catch {
-    return json({ error: "Request body must be JSON." }, 400);
-  }
-  const b = (raw ?? {}) as Record<string, unknown>;
+  const b = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
   const purpose = typeof b.purpose === "string" ? b.purpose.trim() : "";
   if (purpose.length < 15 || purpose.length > 2000) return json({ error: "Purpose must be 15 to 2000 characters." }, 400);
   const refs = b.references;
@@ -40,60 +65,99 @@ async function handle(req: Request) {
   const email = typeof t.email === "string" ? t.email.trim() : "";
   const contactName = typeof t.contactName === "string" ? t.contactName.trim().slice(0, 120) : "";
   const context = typeof t.context === "string" ? t.context.trim().slice(0, 2000) : "";
+  const sponsorId = typeof t.sponsorId === "string" ? t.sponsorId.slice(0, 64) : "";
+  const hasAttachment = b.hasAttachment !== false;
   if (company.length < 1 || company.length > 120) return json({ error: "Company must be 1 to 120 characters." }, 400);
   if (!EMAIL_RE.test(email) || email.length > 254) return json({ error: "Recipient email doesn't look valid." }, 400);
 
-  const lines = (research: string) =>
+  // Everything the team already knows about this sponsor, plus their own website.
+  const sp = await loadSponsor(sponsorId, me.token);
+  const emailDomain = domainOf(email);
+  const site = sp?.website || (emailDomain && !FREE_MAIL.test(emailDomain) ? emailDomain : "");
+  const siteText = await readWebsite(site);
+  const known = {
+    partnerType: sp?.partnerType || "",
+    website: site,
+    facebook: sp?.facebook || "",
+    linkedin: sp?.linkedin || "",
+    teamNotes: [sp?.description, context].filter(Boolean).join(" | "),
+  };
+
+  // Step 1: research brief.
+  const researchPrompt = (search: boolean) =>
     [
-      "You write outreach emails for the Fundraising (FR) team of the IEEE MET Student Branch (Mansoura, Egypt).",
-      "",
-      `Company: ${company}`,
-      `Contact name: ${contactName || "(not given)"}`,
-      `Notes from our team about this company: ${context || "(none)"}`,
-      `Sender: ${me.name || "a member of the FR team"} (${me.email}), FR team, IEEE MET Student Branch`,
-      "",
-      `Purpose of this email: ${purpose}`,
-      "",
-      "Reference emails that worked before (match their tone and structure):",
-      ...(refs as string[]).map((r, i) => `--- Reference ${i + 1} ---\n${r.trim()}`),
-      "--- End of references ---",
-      "",
-      "Steps:",
-      `1. ${research}`,
-      "2. Write ONE outreach email from the sender above. Follow the tone and structure of the reference emails, and sign it with the sender's name, role and email.",
-      contactName ? `3. Address the contact by name (${contactName}).` : "3. No contact name is given, so use a polite generic greeting.",
-      `4. Mention ${company} by name. Use at most one specific fact about the company, and never invent facts. If you aren't sure of a fact, leave it out.`,
-      "5. Make it read like a personal note from one student to one person, not a marketing email, so it lands in the main inbox:",
-      `   - Subject: short, specific and personal, written for ${company} only (for example "${(me.name || "Omar").split(" ")[0]} from IEEE MET, a question about your student programs"). Never use generic subjects like "Partnership opportunity" or "Sponsorship proposal", and no ALL CAPS, exclamation marks or emojis.`,
-      "   - Open with one or two plain, personal sentences (who you are and why you are writing to them specifically) before any ask.",
-      "   - Avoid promotional wording: no \"exclusive\", \"don't miss\", \"limited\", \"free\", \"offer\", \"opportunity of a lifetime\", and don't list sponsor packages or benefits as bullet points. Mention what we can offer in one natural sentence at most.",
-      "   - Plain text only, no links, under 170 words, ending with one simple question (for example whether they'd be open to a short call).",
-      "",
-      'Return ONLY a JSON object, no markdown, in this shape: {"subject": string, "body": string, "researchSummary": string}',
-      "researchSummary is 2 to 4 sentences on what you know about the company, and says so plainly if it's little.",
-    ].join("\n");
+      `Build a short business brief about "${company}" (Egypt) for a student team that wants them as an event sponsor.`,
+      `What we already know: ${JSON.stringify(known)}`,
+      siteText ? `Text from their website:\n${siteText}` : "We couldn't read their website.",
+      search
+        ? "Use Google Search for: what they sell and to whom, their market position and competitors in Egypt, recent news (launches, expansion, campaigns, hiring, results), signs of how sales are going, their marketing focus and who they want to reach, and any CSR, education or youth programs and past event sponsorships."
+        : "Use the website text and what you reliably know. Don't guess.",
+      'Be factual. If something isn\'t known, write "unknown" rather than guessing.',
+      'Return ONLY JSON: {"overview": string, "offerings": string, "market": string, "momentum": string (recent news / how business seems to be going), "needs": string (what they likely care about now, e.g. brand awareness with young people, hiring engineers, launching a product), "csr": string, "angle": string (the single most convincing reason THIS company would sponsor a 300-student engineering event), "confidence": "high"|"medium"|"low"}',
+    ].join("\n\n");
 
-  const r = await gemini(
-    lines("Use Google Search to research the company: what it does, its CSR, student and education programs, and past event sponsorships in Egypt."),
-    {
-      search: true,
-      noSearchPrompt: lines("From what you already know, describe the company: what it does and any student or education programs."),
-    },
-  );
-  if (!r.ok) return json({ error: r.error }, r.status === 503 ? 503 : r.status);
+  const research = await ask(researchPrompt(true), { search: true, noSearchPrompt: researchPrompt(false) });
+  if (!research.ok && research.status === 503) return json({ error: research.error }, 503);
+  const brief: Brief = (research.ok && parseJson<Brief>(research.text)) || {};
 
-  const parsed = parseJson<{ subject?: unknown; body?: unknown; researchSummary?: unknown }>(r.text);
+  // Step 2: the email.
+  const writePrompt = [
+    "You write sponsorship outreach emails for the Fundraising (FR) team of the IEEE MET Student Branch (Mansoura, Egypt).",
+    `Sender: ${me.name || "a member of the FR team"} (${me.email}), FR team, IEEE MET Student Branch.`,
+    `Company: ${company}. Contact: ${contactName || "(no name given)"}.`,
+    `Business brief (from research): ${JSON.stringify(brief)}`,
+    `Team notes: ${known.teamNotes || "(none)"}`,
+    `Purpose of this email: ${purpose}`,
+    "Reference emails that worked before (match their tone and structure, not their exact words):",
+    ...(refs as string[]).map((r, i) => `--- Reference ${i + 1} ---\n${r.trim()}`),
+    "--- End of references ---",
+    "",
+    "Write ONE highly personalised, professional email:",
+    `- Show you understand ${company}'s business: connect the ask to their market, current focus or needs from the brief (one or two specific, true details; never invent facts, skip anything marked unknown).`,
+    "- Make the value for THEM concrete: e.g. reaching ~300 engineering students and young talent, brand visibility with their target audience, a hiring pipeline, product exposure. Pick what fits their needs.",
+    hasAttachment ? "- Mention that our sponsorship proposal is attached." : "- Offer to send our sponsorship proposal.",
+    contactName ? `- Address ${contactName} by name.` : '- No contact name is given: use a polite, natural greeting (not "Dear Hiring Manager").',
+    `- Subject: specific to ${company} and personal, not generic (never just "Partnership opportunity"); no ALL CAPS, emojis or exclamation marks.`,
+    "- Read like a thoughtful note from one person to another: short paragraphs, plain text, no links, no bullet-point benefit lists, no hype words (exclusive, don't miss, limited, free, offer).",
+    "- 140 to 200 words. End with one clear, easy next step (a 15-minute call this or next week).",
+    '- Sign with the sender\'s name, "Fundraising team, IEEE MET Student Branch", and their email.',
+    "",
+    'Return ONLY JSON: {"subject": string, "body": string}',
+  ].join("\n");
+
+  const r = await ask(writePrompt);
+  if (!r.ok) return json({ error: r.error }, r.status);
+  const parsed = parseJson<{ subject?: unknown; body?: unknown }>(r.text);
   if (!parsed || typeof parsed.subject !== "string" || typeof parsed.body !== "string") {
     return json({ error: "The AI didn't return a usable draft. Try again." }, 502);
   }
-  const summary = typeof parsed.researchSummary === "string" ? parsed.researchSummary.trim() : "";
+
+  const lines = [
+    brief.overview && `What they do: ${brief.overview}`,
+    brief.market && `Market: ${brief.market}`,
+    brief.momentum && `Lately: ${brief.momentum}`,
+    brief.needs && `What they likely need: ${brief.needs}`,
+    brief.csr && `CSR / youth: ${brief.csr}`,
+    brief.angle && `Our angle: ${brief.angle}`,
+  ].filter((x): x is string => !!x && !/:\s*unknown\.?$/i.test(x));
+  const searched = research.ok && research.usedSearch;
+  const summary = [
+    !research.ok
+      ? "Couldn't research this company right now, so the email is based on your notes only. Check it before sending."
+      : !searched
+        ? "Researched without a live web search, so double-check any facts."
+        : brief.confidence === "low"
+          ? "Little reliable information was found online. Check the facts before sending."
+          : "",
+    siteText ? `Read their website (${site}).` : "",
+    ...lines,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return json({
     subject: parsed.subject.trim(),
     body: parsed.body.trim(),
-    research: {
-      summary: r.usedSearch ? summary : `Written without a live web search, so double-check any facts. ${summary}`.trim(),
-      sources: r.sources,
-    },
+    research: { summary, sources: research.ok ? research.sources : [] },
   });
 }

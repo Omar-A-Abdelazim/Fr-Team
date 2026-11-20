@@ -16,7 +16,10 @@ export function bearer(req: Request) {
 }
 
 export async function getCaller(req: Request, opts: { admin?: boolean } = {}): Promise<Caller | Fail> {
-  const token = bearer(req);
+  return callerFromToken(bearer(req), opts);
+}
+
+export async function callerFromToken(token: string, opts: { admin?: boolean } = {}): Promise<Caller | Fail> {
   if (!token) return { error: "Sign in again to continue.", status: 401 };
 
   const look = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FB_API_KEY}`, {
@@ -32,6 +35,9 @@ export async function getCaller(req: Request, opts: { admin?: boolean } = {}): P
   if (!doc.ok) return { error: `Couldn't load your profile (${doc.status}).`, status: 500 };
   const f = ((await doc.json()) as { fields?: Record<string, { stringValue?: string }> }).fields ?? {};
   const role = f.role?.stringValue === "admin" ? "admin" : "member";
+  const approved = (f as Record<string, { booleanValue?: boolean }>).approved?.booleanValue;
+  const rejected = (f as Record<string, { booleanValue?: boolean }>).rejected?.booleanValue;
+  if (approved === false || rejected === true) return { error: "Your account is waiting for approval.", status: 403 };
   if (opts.admin && role !== "admin") return { error: "Admins only.", status: 403 };
   return { uid, token, role, name: f.name?.stringValue ?? "", email: f.email?.stringValue ?? "" };
 }
