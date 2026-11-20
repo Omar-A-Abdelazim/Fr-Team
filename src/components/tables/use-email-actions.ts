@@ -32,8 +32,8 @@ export function useEmailActions(ownerId: string | undefined, sponsors: Sponsor[]
         } else {
           toast.success(`Marked as ${REPLY_LABEL[reply].toLowerCase()}`);
         }
-      } catch {
-        toast.error(`Couldn't update the email to ${email.company}. Check your connection and try again.`);
+      } catch (e) {
+        toast.error(`Couldn't update the email to ${email.company}. Check your connection and try again.`, { description: why(e) });
       } finally {
         setBusy(false);
       }
@@ -47,10 +47,10 @@ export function useEmailActions(ownerId: string | undefined, sponsors: Sponsor[]
       setBusy(true);
       try {
         await setEmailRefusal(email, category, sponsorOf(email), ownerId);
-        toast.success(`Saved: ${REFUSAL_LABELS[category].toLowerCase()}`, { description: `${email.company} said no.` });
+        toast.success(`Refusal reason saved for ${email.company}`, { description: `Reason: ${REFUSAL_LABELS[category]}` });
         return true;
-      } catch {
-        toast.error(`Couldn't save the reason for ${email.company}. Check your connection and try again.`);
+      } catch (e) {
+        toast.error(`Couldn't save the reason for ${email.company}.`, { description: why(e) });
         return false;
       } finally {
         setBusy(false);
@@ -60,4 +60,11 @@ export function useEmailActions(ownerId: string | undefined, sponsors: Sponsor[]
   );
 
   return { busy, change, refuse };
+}
+
+function why(e: unknown) {
+  const code = (e as { code?: string })?.code ?? "";
+  if (code === "permission-denied") return "The database rules are out of date. The FR Head needs to publish the latest Firestore rules.";
+  if (code === "unavailable") return "Can't reach the server. Check your connection and try again.";
+  return (e as Error)?.message?.slice(0, 160) || "Try again.";
 }
