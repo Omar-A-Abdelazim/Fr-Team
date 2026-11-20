@@ -4,13 +4,14 @@ import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
   onAuthStateChanged,
+  sendEmailVerification,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut as fbSignOut,
   updateProfile,
   type User,
 } from "firebase/auth";
-import { doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { createContext, useContext, useEffect, useState } from "react";
 import { ADMIN_EMAILS, auth, db } from "./client";
 import type { Member } from "@/types";
@@ -21,7 +22,8 @@ type AuthState = {
   user: User | null;
   profile: Member | null;
   loading: boolean;
-  signInGoogle: () => Promise<void>;
+  /** "signin" refuses people without an account; "signup" creates one (pending approval). */
+  signInGoogle: (mode: "signin" | "signup") => Promise<void>;
   signInEmail: (email: string, password: string) => Promise<void>;
   signUpEmail: (name: string, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -29,19 +31,33 @@ type AuthState = {
 
 const Ctx = createContext<AuthState | null>(null);
 
-async function ensureProfile(u: User, nameOverride?: string) {
-  const ref = doc(db, "users", u.uid);
-  const snap = await getDoc(ref);
-  if (snap.exists()) return;
+class AuthFlowError extends Error {
+  constructor(public code: string) {
+    super(code);
+  }
+}
+
+/** Listed admins skip approval, but only once Google (or their inbox) has proven they own the email. */
+function isListedAdmin(u: User) {
+  return ADMIN_EMAILS.includes((u.email ?? "").toLowerCase()) && u.emailVerified;
+}
+
+async function createProfile(u: User, name?: string) {
   const email = (u.email ?? "").toLowerCase();
-  await setDoc(ref, {
-    name: nameOverride || u.displayName || email.split("@")[0],
+  const admin = isListedAdmin(u);
+  await setDoc(doc(db, "users", u.uid), {
+    name: name || u.displayName || email.split("@")[0],
     email,
     photoURL: u.photoURL ?? null,
-    role: ADMIN_EMAILS.includes(email) && u.emailVerified ? "admin" : "member",
-    color: PALETTE[Math.abs([...u.uid].reduce((a, c) => a + c.charCodeAt(0), 0)) % PALETTE.length],
+    role: admin ? "admin" : "member",
+    approved: admin,
+    color: PALETTE[[...u.uid].reduce((a, c) => a + c.charCodeAt(0), 0) % PALETTE.length],
     createdAt: serverTimestamp(),
   });
+}
+
+async function hasProfile(u: User) {
+  return (await getDoc(doc(db, "users", u.uid))).exists();
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -51,7 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let unsubProfile: (() => void) | undefined;
-    const unsub = onAuthStateChanged(auth, async (u) => {
+    const unsub = onAuthStateChanged(auth, (u) => {
       unsubProfile?.();
       setUser(u);
       if (!u) {
@@ -59,16 +75,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
         return;
       }
-      try {
-        await ensureProfile(u);
-      } catch {
-        // rules may reject if something is off; the snapshot below surfaces the state
-      }
       unsubProfile = onSnapshot(
         doc(db, "users", u.uid),
         (snap) => {
           const d = snap.data();
-          setProfile(d ? ({ id: snap.id, ...d } as Member) : null);
+          const p = d ? ({ id: snap.id, ...d } as Member) : null;
+          // A listed admin who signed up before verifying their email gets upgraded once verified.
+          if (p && isListedAdmin(u) && (p.role !== "admin" || p.approved === false)) {
+            updateDoc(snap.ref, { role: "admin", approved: true }).catch(() => undefined);
+          }
+          setProfile(p);
           setLoading(false);
         },
         () => setLoading(false),
@@ -84,16 +100,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     user,
     profile,
     loading,
-    async signInGoogle() {
-      await signInWithPopup(auth, new GoogleAuthProvider());
+    async signInGoogle(mode) {
+      const cred = await signInWithPopup(auth, new GoogleAuthProvider());
+      if (await hasProfile(cred.user)) return;
+      if (mode === "signin" && !isListedAdmin(cred.user)) {
+        await fbSignOut(auth);
+        throw new AuthFlowError("app/no-account");
+      }
+      await createProfile(cred.user);
     },
     async signInEmail(email, password) {
-      await signInWithEmailAndPassword(auth, email, password);
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      if (await hasProfile(cred.user)) return;
+      await fbSignOut(auth);
+      throw new AuthFlowError("app/no-account");
     },
     async signUpEmail(name, email, password) {
       const cred = await createUserWithEmailAndPassword(auth, email, password);
       await updateProfile(cred.user, { displayName: name });
-      await ensureProfile(cred.user, name);
+      sendEmailVerification(cred.user).catch(() => undefined);
+      await createProfile(cred.user, name);
     },
     async signOut() {
       await fbSignOut(auth);
@@ -110,9 +136,10 @@ export function useAuth() {
 }
 
 const MESSAGES: Record<string, string> = {
+  "app/no-account": "You don't have an account yet. Use Join the team to request access.",
   "auth/invalid-credential": "Email or password is wrong. Check them and try again.",
   "auth/wrong-password": "Email or password is wrong. Check them and try again.",
-  "auth/user-not-found": "No account with this email yet. Use Join the team to create one.",
+  "auth/user-not-found": "No account with this email yet. Use Join the team to request access.",
   "auth/email-already-in-use": "This email already has an account. Sign in instead.",
   "auth/weak-password": "Use a password with at least 6 characters.",
   "auth/invalid-email": "That email doesn't look right.",

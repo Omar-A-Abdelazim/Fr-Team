@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/firebase/auth-context";
 import { motion, useReducedMotion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
-import { Inbox, BarChart3, Building2, CheckCheck, LogOut, Mail, Sparkles, Trophy } from "lucide-react";
+import { Inbox, UserCheck, BarChart3, Building2, CheckCheck, LogOut, Mail, Sparkles, Trophy } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { cn } from "@/lib/utils";
@@ -43,7 +43,8 @@ const MEMBER_NAV = [
 
 const ADMIN_NAV = [
   { href: "/admin", label: "Overview", icon: BarChart3 },
-  { href: "/admin/approvals", label: "Approvals", icon: CheckCheck },
+  { href: "/admin/accounts", label: "Accounts", icon: UserCheck },
+  { href: "/admin/approvals", label: "New entries", icon: CheckCheck },
   { href: "/admin/insights", label: "Refusal insights", icon: Sparkles },
   { href: "/admin/emails", label: "Email composer", icon: Mail },
 ];

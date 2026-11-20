@@ -54,4 +54,7 @@ export type Member = {
   role: "member" | "admin";
   color: string;
   photoURL?: string | null;
+  /** false while waiting for an admin; missing on accounts created before approvals existed */
+  approved?: boolean;
+  rejected?: boolean;
 };

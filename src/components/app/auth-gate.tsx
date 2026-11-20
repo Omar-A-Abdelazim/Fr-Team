@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/firebase/auth-context";
+import { PendingScreen } from "@/components/app/pending-screen";
 
 function Loader() {
   return (
@@ -33,26 +34,18 @@ function Loader() {
 export function AuthGate({ children, admin = false }: { children: React.ReactNode; admin?: boolean }) {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
-  const blocked = !loading && (!user || (admin && profile?.role !== "admin"));
+  const blocked = !loading && (!user || !profile || (admin && profile?.role !== "admin"));
 
   useEffect(() => {
     if (loading) return;
-    if (!user) router.replace("/");
+    if (!user || !profile) router.replace("/");
     else if (admin && profile && profile.role !== "admin") {
       toast.error("Admins only", { description: "Ask the FR Head for admin access." });
       router.replace("/app");
     }
   }, [loading, user, profile, admin, router]);
 
-  if (!loading && user && !profile)
-    return (
-      <div className="grid min-h-dvh place-items-center p-6 text-center">
-        <div className="max-w-sm">
-          <p className="font-display text-xl font-bold">Your profile couldn&apos;t be created</p>
-          <p className="mt-2 text-muted">The database rules may not be published yet. Ask the FR Head to check Firestore rules, then reload.</p>
-        </div>
-      </div>
-    );
   if (loading || blocked || !profile) return <Loader />;
+  if (profile.rejected || profile.approved === false) return <PendingScreen rejected={!!profile.rejected} name={profile.name} />;
   return <>{children}</>;
 }

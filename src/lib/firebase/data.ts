@@ -219,3 +219,18 @@ export async function setEmailRefusal(
     });
   }
 }
+
+/** Admin only: let a pending account into FR Hub. */
+export async function approveUser(uid: string, by: string) {
+  await updateDoc(doc(db, "users", uid), { approved: true, rejected: false, approvedBy: by, approvedAt: serverTimestamp() });
+}
+
+/** Admin only: refuse (or remove) someone's access. Their sponsors stay. */
+export async function rejectUser(uid: string, by: string) {
+  await updateDoc(doc(db, "users", uid), { approved: false, rejected: true, rejectedBy: by, rejectedAt: serverTimestamp() });
+}
+
+/** Admin only: promote or demote. */
+export async function setUserRole(uid: string, role: "member" | "admin") {
+  await updateDoc(doc(db, "users", uid), { role });
+}

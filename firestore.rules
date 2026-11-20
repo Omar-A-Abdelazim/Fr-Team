@@ -9,24 +9,30 @@ service cloud.firestore {
     function isAdmin() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && me().role == "admin"; }
     // Keep in sync with NEXT_PUBLIC_ADMIN_EMAILS.
     function bootstrapAdmin() {
-      return request.auth.token.email in ["omarahmedabdelazim2005@gmail.com"]
+      return request.auth.token.email in ["omarahmedabdelazim2005@gmail.com", "shahdelhosiny21@gmail.com", "saraata002@gmail.com", "nadaalsaied21@gmail.com", "knada6325@gmail.com", "yassintube126@gmail.com", "basmala.a.attia@gmail.com"]
         && request.auth.token.email_verified == true;
     }
+    // accounts created before approvals existed have no "approved" field and stay active
+    function isApproved() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && me().get("approved", true) == true && me().get("rejected", false) == false; }
     function changes(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasAny(keys); }
 
     match /users/{uid} {
       allow read: if signedIn();
-      // a new user can only create their own profile, as a member (or admin if on the bootstrap list)
+      // new accounts start as members waiting for approval; listed admins (verified email) start approved
       allow create: if signedIn() && request.auth.uid == uid
-        && (request.resource.data.role == "member" || (request.resource.data.role == "admin" && bootstrapAdmin()));
-      // users may edit their own name/photo; only admins may change roles
-      allow update: if (signedIn() && request.auth.uid == uid && !changes(["role", "email"])) || isAdmin();
+        && ((request.resource.data.role == "member" && request.resource.data.approved == false)
+            || (request.resource.data.role == "admin" && request.resource.data.approved == true && bootstrapAdmin()));
+      // users may edit their own name/photo; listed admins may promote themselves; admins manage everyone
+      allow update: if (signedIn() && request.auth.uid == uid && !changes(["role", "email", "approved", "rejected"]))
+                    || (signedIn() && request.auth.uid == uid && bootstrapAdmin()
+                        && request.resource.data.role == "admin" && request.resource.data.approved == true)
+                    || isAdmin();
       allow delete: if isAdmin();
     }
 
     match /sponsors/{id} {
-      allow read: if signedIn();
-      allow create: if signedIn()
+      allow read: if isApproved();
+      allow create: if isApproved()
         && request.resource.data.ownerId == request.auth.uid
         // auto-approval: points must match the partner type exactly, or be 0 when not approved
         && ((request.resource.data.approved == false && request.resource.data.points == 0)
@@ -36,7 +42,7 @@ service cloud.firestore {
         && request.resource.data.name is string
         && request.resource.data.name.size() > 1;
       // owners edit their own entries but never approval or points
-      allow update: if (signedIn() && resource.data.ownerId == request.auth.uid
+      allow update: if (isApproved() && resource.data.ownerId == request.auth.uid
                         && !changes(["ownerId", "approved", "reviewed", "points", "approvedAt"]))
                     || isAdmin();
       allow delete: if isAdmin();
@@ -44,25 +50,25 @@ service cloud.firestore {
 
     // Unique company keys (website domain, LinkedIn slug). Create-only: a second claim is rejected.
     match /sponsorKeys/{key} {
-      allow read: if signedIn();
-      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow read: if isApproved();
+      allow create: if isApproved() && request.resource.data.ownerId == request.auth.uid;
       allow update: if false;
       allow delete: if isAdmin();
     }
 
     // One entry per email sent from the site. Used for the daily limit and history.
     match /emailLogs/{id} {
-      allow read: if signedIn() && (resource.data.senderId == request.auth.uid || isAdmin());
-      allow create: if signedIn() && request.resource.data.senderId == request.auth.uid;
+      allow read: if isApproved() && (resource.data.senderId == request.auth.uid || isAdmin());
+      allow create: if isApproved() && request.resource.data.senderId == request.auth.uid;
       // the sender can only update the reply status of their own email
-      allow update: if signedIn() && resource.data.senderId == request.auth.uid
+      allow update: if isApproved() && resource.data.senderId == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["reply", "replyAt", "refusalCategory"])
         && request.resource.data.reply in ["waiting", "replied", "accepted", "refused"];
       allow delete: if false;
     }
 
     match /settings/{doc} {
-      allow read: if signedIn();
+      allow read: if isApproved();
       allow write: if isAdmin();
     }
   }

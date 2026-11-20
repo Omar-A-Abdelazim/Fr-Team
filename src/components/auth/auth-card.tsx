@@ -117,7 +117,7 @@ export function AuthCard() {
 
       <button
         type="button"
-        onClick={() => run("google", signInGoogle)}
+        onClick={() => run("google", () => signInGoogle(mode))}
         disabled={busy !== null}
         className="mt-6 flex h-11 disabled:opacity-60 w-full items-center justify-center gap-3 rounded-xl border border-line bg-bg font-semibold transition-colors duration-150 hover:bg-fg/5"
       >

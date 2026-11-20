@@ -18,7 +18,7 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 
 // Must match the list in firestore.rules.
-export const ADMIN_EMAILS = (process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? "omarahmedabdelazim2005@gmail.com")
+export const ADMIN_EMAILS = (process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? "omarahmedabdelazim2005@gmail.com,shahdelhosiny21@gmail.com,saraata002@gmail.com,nadaalsaied21@gmail.com,knada6325@gmail.com,yassintube126@gmail.com,basmala.a.attia@gmail.com")
   .split(",")
   .map((e) => e.trim().toLowerCase())
   .filter(Boolean);
