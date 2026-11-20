@@ -966,7 +966,8 @@ function SendStep({ targets, drafts, onBack }: { targets: Target[]; drafts: Reco
       if (!alive.current) break;
       const r = await sendOne(list[i]);
       if (r === "off") break;
-      if (i < list.length - 1) await sleep(1200);
+      // a human-like, uneven gap between sends looks less like a bulk campaign to Gmail
+      if (i < list.length - 1) await sleep(6000 + Math.random() * 6000);
     }
     if (alive.current) setBusy(false);
   }
