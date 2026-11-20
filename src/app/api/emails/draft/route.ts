@@ -149,7 +149,12 @@ async function handle(req: Request) {
       return json({ error: "Couldn't reach Gemini. Try again." }, 502);
     }
     usedSearch = a.search;
-    if (res.status !== 404 && res.status !== 429) break;
+    // 404 retired model, 429 quota, 500/503 overloaded: move on to the next option
+    if (![404, 429, 500, 503].includes(res.status)) break;
+    if (res.status >= 500) await new Promise((r) => setTimeout(r, 1500));
+  }
+  if (res && res.status >= 500) {
+    return json({ error: "Gemini is busy right now. Wait a minute and try again." }, 502);
   }
   if (res && res.status === 429) {
     return json(
