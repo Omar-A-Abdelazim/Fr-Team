@@ -692,9 +692,7 @@ function AttachmentsSection({
       <div>
         <h2 className="font-display text-lg font-bold">Attachments</h2>
         <p className="text-sm text-muted">
-          {blob?.enabled
-            ? "Add your proposal or flyer. Up to 20 MB in total. It goes with every email."
-            : "Files up to 3 MB for now. The FR Head can turn on larger uploads."}
+          {`Add your proposal or flyer (up to ${blob?.enabled ? "20" : "3"} MB). The same file goes with every email.`}
         </p>
       </div>
 
