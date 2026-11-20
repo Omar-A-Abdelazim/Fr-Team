@@ -1,127 +1,139 @@
 "use client";
 
 import { animate, motion, useMotionValue, useReducedMotion, useTransform } from "framer-motion";
+import { Check } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import { Coin, Envelope, Spark } from "@/components/auth/shapes";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
+import { Envelope } from "@/components/auth/shapes";
 
-const TOTAL_MS = 4500;
-const COLORS = ["#f5b83d", "#4cc3f2", "#3dd6a3", "#ffffff", "#f47c6b"];
+const TOTAL_MS = 6000;
+const REDUCED_MS = 2000;
+const COLORS = ["#f5b83d", "#4cc3f2", "#3dd6a3", "#ffffff"];
 const EASE = [0.16, 1, 0.3, 1] as const;
 
-/** Deterministic 0..1 pseudo-random so SSR and client agree. */
-const rnd = (i: number, salt: number) => {
-  const x = Math.sin(i * 12.9898 + salt * 78.233) * 43758.5453;
-  return x - Math.floor(x);
-};
+/** Stage is drawn on a fixed 400x200 canvas and scaled to fit the viewport. */
+const STAGE_W = 400;
+const STAGE_H = 200;
+const SEAL = { x: 200, y: 112 };
+const PLANE_PATH =
+  "M-30 172 C 40 178 90 150 110 115 C 125 85 95 62 78 86 C 60 110 105 138 170 106 C 240 72 300 62 440 0";
 
-function BigEnvelope() {
-  return (
-    <div className="relative h-[168px] w-[240px] [perspective:900px] sm:h-[210px] sm:w-[300px]">
-      {/* letter sliding out */}
-      <motion.div
-        className="absolute inset-x-6 bottom-6 top-3 rounded-lg bg-white shadow-lg"
-        initial={{ y: 0 }}
-        animate={{ y: -64 }}
-        transition={{ delay: 0.95, duration: 0.6, ease: EASE }}
-      >
-        <div className="mx-4 mt-4 space-y-2">
-          <div className="h-2 w-2/3 rounded bg-[#4cc3f2]/60" />
-          <div className="h-2 rounded bg-[#071a33]/15" />
-          <div className="h-2 w-5/6 rounded bg-[#071a33]/15" />
-        </div>
-      </motion.div>
-      {/* body */}
-      <svg viewBox="0 0 300 210" className="absolute inset-0 size-full drop-shadow-[0_20px_40px_rgba(76,195,242,0.35)]" aria-hidden>
-        <rect x="2" y="2" width="296" height="206" rx="18" fill="#0c2546" stroke="#4cc3f2" strokeWidth="4" />
-        <path d="M4 206L130 104M296 206L170 104" stroke="#4cc3f2" strokeOpacity=".5" strokeWidth="3" fill="none" />
-      </svg>
-      {/* flap */}
-      <motion.div
-        className="absolute inset-x-0 top-0 h-1/2 [transform-style:preserve-3d]"
-        style={{ transformOrigin: "50% 0%" }}
-        initial={{ rotateX: 0 }}
-        animate={{ rotateX: 180 }}
-        transition={{ delay: 0.7, duration: 0.55, ease: EASE }}
-      >
-        <svg viewBox="0 0 300 105" className="size-full [backface-visibility:hidden]" aria-hidden>
-          <path d="M2 20Q2 2 20 2H280Q298 2 298 20L150 104Z" fill="#12315b" stroke="#4cc3f2" strokeWidth="4" strokeLinejoin="round" />
-          <circle cx="150" cy="70" r="14" fill="#f5b83d" />
-        </svg>
-      </motion.div>
-    </div>
-  );
-}
-
-const BURST = Array.from({ length: 26 }, (_, i) => {
-  const a = (i / 26) * Math.PI * 2 + rnd(i, 1) * 0.4;
-  const d = 240 + rnd(i, 2) * 380;
+const ARC = [-64, -32, 0, 32, 64].map((deg) => {
+  const r = (deg * Math.PI) / 180;
   return {
-    kind: i % 3,
-    size: 26 + Math.round(rnd(i, 3) * 28),
-    x: Math.cos(a) * d,
-    y: Math.sin(a) * d * 0.8,
-    fall: 120 + rnd(i, 4) * 220,
-    rot: (rnd(i, 5) - 0.5) * 720,
-    delay: 0.95 + rnd(i, 6) * 0.25,
-    color: COLORS[i % COLORS.length],
+    deg,
+    x: Math.round((200 + 128 * Math.sin(r)) * 100) / 100,
+    y: Math.round((176 - 122 * Math.cos(r)) * 100) / 100,
   };
 });
 
-const PLANES = Array.from({ length: 5 }, (_, i) => ({
-  top: 10 + i * 17 + rnd(i, 7) * 6,
-  delay: 1.2 + i * 0.5,
-  dur: 1.6 + rnd(i, 8) * 0.8,
-  rev: i % 2 === 1,
-  size: 40 + (i % 3) * 14,
-  tilt: -12 + rnd(i, 9) * 24,
-}));
+const SEAL_POINTS = Array.from({ length: 48 }, (_, i) => {
+  const a = (i / 48) * Math.PI * 2;
+  const rad = i % 2 === 0 ? 46 : 41;
+  return `${(48 + Math.cos(a) * rad).toFixed(2)},${(48 + Math.sin(a) * rad).toFixed(2)}`;
+}).join(" ");
+
+function PaperPlane() {
+  return (
+    <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden className="drop-shadow-[0_6px_14px_rgba(76,195,242,0.55)]">
+      <path d="M2 20 38 3 29 37 20 25z" fill="#ffffff" />
+      <path d="M2 20 20 25 38 3z" fill="#bfe8fb" />
+      <path d="M20 25 24 35 29 37 38 3z" fill="#4cc3f2" />
+    </svg>
+  );
+}
+
+function GoldSeal() {
+  return (
+    <svg width="96" height="96" viewBox="0 0 96 96" aria-hidden className="drop-shadow-[0_10px_30px_rgba(245,184,61,0.5)]">
+      <defs>
+        <linearGradient id="seal-g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#ffe29a" />
+          <stop offset="0.55" stopColor="#f5b83d" />
+          <stop offset="1" stopColor="#c8841a" />
+        </linearGradient>
+      </defs>
+      <polygon points={SEAL_POINTS} fill="url(#seal-g)" />
+      <circle cx="48" cy="48" r="33" fill="none" stroke="#071a33" strokeOpacity=".35" strokeWidth="2" />
+      <circle cx="48" cy="48" r="29" fill="#071a33" fillOpacity=".12" />
+      <path d="M34 49l9 9 19-21" fill="none" stroke="#071a33" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 function fireConfetti(stop: { current: boolean }) {
   import("canvas-confetti").then(({ default: confetti }) => {
     if (stop.current) return;
     const base = { colors: COLORS, zIndex: 120, disableForReducedMotion: true };
     const t = (ms: number, fn: () => void) => setTimeout(() => !stop.current && fn(), ms);
-    t(500, () => {
-      confetti({ ...base, particleCount: 90, angle: 60, spread: 70, startVelocity: 62, origin: { x: 0, y: 1 } });
-      confetti({ ...base, particleCount: 90, angle: 120, spread: 70, startVelocity: 62, origin: { x: 1, y: 1 } });
+    t(900, () => {
+      confetti({ ...base, particleCount: 70, angle: 60, spread: 65, startVelocity: 58, origin: { x: 0, y: 0.95 } });
+      confetti({ ...base, particleCount: 70, angle: 120, spread: 65, startVelocity: 58, origin: { x: 1, y: 0.95 } });
     });
-    t(1000, () => confetti({ ...base, particleCount: 160, spread: 360, startVelocity: 38, origin: { x: 0.5, y: 0.45 }, scalar: 1.2 }));
-    t(1700, () => {
-      confetti({ ...base, particleCount: 70, angle: 60, spread: 80, startVelocity: 55, origin: { x: 0, y: 1 } });
-      confetti({ ...base, particleCount: 70, angle: 120, spread: 80, startVelocity: 55, origin: { x: 1, y: 1 } });
-    });
-    // slow rain for ~2.5s
-    t(1800, () => {
-      const end = performance.now() + 2500;
-      const tick = () => {
-        if (stop.current) return;
-        confetti({ ...base, particleCount: 3, angle: 90, spread: 160, startVelocity: 14, gravity: 0.5, ticks: 260, origin: { x: Math.random(), y: -0.05 } });
-        if (performance.now() < end) requestAnimationFrame(tick);
-      };
-      tick();
-    });
+    t(1600, () => confetti({ ...base, particleCount: 110, spread: 360, startVelocity: 34, scalar: 1.1, origin: { x: 0.5, y: 0.36 } }));
   });
 }
 
-export function SentCelebration({ count }: { count: number }) {
+type Props = { count: number; onFinish?: () => void };
+
+export function SentCelebration({ count, onFinish }: Props) {
   const router = useRouter();
   const reduce = !!useReducedMotion();
+  const uid = useId().replace(/:/g, "");
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+  const [scale, setScale] = useState(1);
   const went = useRef(false);
   const stop = useRef(false);
+  const planeRef = useRef<HTMLDivElement>(null);
+  const finishRef = useRef(onFinish);
   const n = useMotionValue(0);
   const shown = useTransform(n, (v) => Math.round(v).toString());
 
+  useEffect(() => {
+    finishRef.current = onFinish;
+  }, [onFinish]);
+
+  /** One-shot exit: reset the composer first, then go home. */
   const leave = useCallback(() => {
     if (went.current) return;
     went.current = true;
+    stop.current = true;
+    finishRef.current?.();
     router.push("/app");
   }, [router]);
 
+  // lock body scroll while open
   useEffect(() => {
-    const total = reduce ? 2000 : TOTAL_MS;
-    const timer = setTimeout(leave, total);
-    const counter = animate(n, count, { duration: reduce ? 0.6 : 1.6, delay: reduce ? 0 : 1.1, ease: "easeOut" });
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  // fit the stage to short / narrow screens
+  useEffect(() => {
+    const fit = () => setScale(Math.max(0.5, Math.min(1, (window.innerWidth - 32) / STAGE_W, (window.innerHeight * 0.3) / STAGE_H)));
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && leave();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [leave]);
+
+  useEffect(() => {
+    stop.current = false;
+    const timer = setTimeout(leave, reduce ? REDUCED_MS : TOTAL_MS);
+    const counter = animate(n, count, { duration: reduce ? 0.6 : 1.2, delay: reduce ? 0 : 1.6, ease: "easeOut" });
     if (!reduce) fireConfetti(stop);
     return () => {
       clearTimeout(timer);
@@ -131,112 +143,153 @@ export function SentCelebration({ count }: { count: number }) {
     };
   }, [count, leave, reduce, n]);
 
-  const label = useMemo(() => (count === 1 ? "email sent!" : "emails sent!"), [count]);
+  // plane rides the trail path
+  useEffect(() => {
+    const el = planeRef.current;
+    if (!mounted || reduce || !el || typeof el.animate !== "function") return;
+    const anim = el.animate([{ offsetDistance: "0%" }, { offsetDistance: "100%" }], {
+      delay: 250,
+      duration: 1500,
+      easing: "cubic-bezier(0.45, 0, 0.35, 1)",
+      fill: "both",
+    });
+    return () => anim.cancel();
+  }, [mounted, reduce]);
 
-  return (
+  if (!mounted) return null;
+
+  const label = count === 1 ? "email sent" : "emails sent";
+  const maskId = `trail-${uid}`;
+
+  return createPortal(
     <motion.div
       role="dialog"
       aria-modal="true"
       aria-label="All emails sent"
-      className="dark fixed inset-0 z-[100] grid place-items-center overflow-hidden bg-[#050f21] text-fg"
+      className="dark fixed inset-0 z-[100] flex flex-col overflow-hidden bg-[#050f21] text-fg"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: reduce ? 0.2 : 0.45 }}
     >
-      {!reduce && (
-        <>
-          <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(42,143,208,0.28),transparent_65%)]" />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_70%_60%_at_50%_42%,#12447a_0%,#0a2447_45%,#050f21_100%)]"
+      />
 
-          {/* paper planes */}
-          {PLANES.map((p, i) => (
-            <motion.div
-              key={i}
-              aria-hidden
-              className="pointer-events-none absolute left-0"
-              style={{ top: `${p.top}%` }}
-              initial={{ x: p.rev ? "110vw" : "-20vw", rotate: p.tilt, opacity: 0 }}
-              animate={{ x: p.rev ? "-20vw" : "110vw", y: [0, -40, 20, -20], opacity: [0, 1, 1, 0] }}
-              transition={{ delay: p.delay, duration: p.dur, ease: "easeIn" }}
-            >
-              <div style={{ transform: p.rev ? "scaleX(-1)" : undefined }}>
-                <Envelope size={p.size} />
-              </div>
-            </motion.div>
-          ))}
-
-          {/* burst from the envelope */}
-          <div aria-hidden className="pointer-events-none absolute left-1/2 top-[38%]">
-            {BURST.map((b, i) => (
-              <motion.div
-                key={i}
-                className="absolute -ml-4 -mt-4"
-                initial={{ x: 0, y: 0, scale: 0, opacity: 0, rotate: 0 }}
-                animate={{
-                  x: [0, b.x, b.x * 1.08],
-                  y: [0, b.y, b.y + b.fall],
-                  scale: [0, 1.1, 0.9],
-                  opacity: [0, 1, 0.85],
-                  rotate: b.rot,
-                }}
-                transition={{ delay: b.delay, duration: 2.6, times: [0, 0.35, 1], ease: "easeOut" }}
-              >
-                {b.kind === 0 ? <Envelope size={b.size + 10} /> : b.kind === 1 ? <Coin size={b.size} /> : <Spark size={b.size * 0.8} color={b.color} />}
-              </motion.div>
-            ))}
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-5 py-6 text-center">
+        {/* stage */}
+        {reduce ? (
+          <div className="mb-5 grid size-16 place-items-center rounded-full bg-[#f5b83d] text-[#071a33]">
+            <Check className="size-8" strokeWidth={3} />
           </div>
-        </>
-      )}
+        ) : (
+          <div className="shrink-0" style={{ width: STAGE_W * scale, height: STAGE_H * scale }}>
+            <div className="relative origin-top-left" style={{ width: STAGE_W, height: STAGE_H, transform: `scale(${scale})` }}>
+              {/* envelopes fanned in an arc, flipping like cards */}
+              {ARC.map((e, i) => (
+                <div
+                  key={e.deg}
+                  aria-hidden
+                  className="absolute"
+                  style={{ left: e.x, top: e.y, transform: `translate(-50%,-50%) rotate(${e.deg}deg)` }}
+                >
+                  <motion.div
+                    initial={{ rotateY: 90, opacity: 0, y: 14 }}
+                    animate={{ rotateY: 0, opacity: 1, y: 0 }}
+                    transition={{ delay: 1.05 + i * 0.1, duration: 0.55, ease: EASE }}
+                    style={{ transformPerspective: 600 }}
+                  >
+                    <Envelope size={66} />
+                  </motion.div>
+                </div>
+              ))}
 
-      <div className="relative z-10 flex flex-col items-center px-6 text-center">
-        {!reduce && (
-          <motion.div
-            initial={{ scale: 0, rotate: -8 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{ type: "spring", stiffness: 160, damping: 13, delay: 0.25 }}
-            className="mb-8"
-          >
-            <BigEnvelope />
-          </motion.div>
+              {/* dashed trail that draws itself */}
+              <svg aria-hidden className="pointer-events-none absolute inset-0 overflow-visible" width={STAGE_W} height={STAGE_H} viewBox={`0 0 ${STAGE_W} ${STAGE_H}`}>
+                <defs>
+                  <mask id={maskId} maskUnits="userSpaceOnUse" x="-40" y="-20" width="500" height="240">
+                    <motion.path
+                      d={PLANE_PATH}
+                      fill="none"
+                      stroke="#fff"
+                      strokeWidth="10"
+                      initial={{ pathLength: 0 }}
+                      animate={{ pathLength: 1 }}
+                      transition={{ delay: 0.25, duration: 1.5, ease: [0.45, 0, 0.35, 1] }}
+                    />
+                  </mask>
+                </defs>
+                <motion.g
+                  mask={`url(#${maskId})`}
+                  initial={{ opacity: 1 }}
+                  animate={{ opacity: 0 }}
+                  transition={{ delay: 2.1, duration: 0.6 }}
+                >
+                  <path d={PLANE_PATH} fill="none" stroke="#4cc3f2" strokeWidth="2.5" strokeLinecap="round" strokeDasharray="2 9" />
+                </motion.g>
+              </svg>
+
+              {/* paper plane */}
+              <div
+                ref={planeRef}
+                aria-hidden
+                className="pointer-events-none absolute left-0 top-0"
+                style={{ offsetPath: `path("${PLANE_PATH}")`, offsetRotate: "auto", offsetDistance: "0%", opacity: 1 }}
+              >
+                <PaperPlane />
+              </div>
+
+              {/* seal slam + ripple */}
+              <div aria-hidden className="absolute" style={{ left: SEAL.x, top: SEAL.y }}>
+                <motion.span
+                  className="absolute -ml-24 -mt-24 size-48 rounded-full bg-[#f5b83d]/25 blur-3xl"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: [0, 1, 0.6] }}
+                  transition={{ delay: 1.5, duration: 1.2 }}
+                />
+                {[0, 1].map((i) => (
+                  <motion.span
+                    key={i}
+                    className="absolute -ml-12 -mt-12 size-24 rounded-full border-2 border-[#f5b83d]"
+                    initial={{ scale: 0.6, opacity: 0 }}
+                    animate={{ scale: [0.8, 3.2], opacity: [0.8, 0] }}
+                    transition={{ delay: 1.58 + i * 0.22, duration: 1.1, ease: "easeOut" }}
+                  />
+                ))}
+                <motion.div
+                  className="absolute -ml-12 -mt-12"
+                  initial={{ scale: 2.6, opacity: 0, rotate: -18 }}
+                  animate={{ scale: [2.6, 0.88, 1], opacity: [0, 1, 1], rotate: [-18, 4, 0] }}
+                  transition={{ delay: 1.5, duration: 0.55, times: [0, 0.65, 1], ease: "easeOut" }}
+                >
+                  <GoldSeal />
+                </motion.div>
+              </div>
+            </div>
+          </div>
         )}
 
-        <div className="relative">
-          {/* shimmering gold ring pulse */}
-          {!reduce && (
-            <>
-              {[0, 1].map((i) => (
-                <motion.span
-                  key={i}
-                  aria-hidden
-                  className="pointer-events-none absolute left-1/2 top-1/2 -ml-[210px] -mt-[110px] h-[220px] w-[420px] rounded-[999px] border-2 border-[#f5b83d] shadow-[0_0_40px_rgba(245,184,61,0.55)]"
-                  initial={{ scale: 0.6, opacity: 0 }}
-                  animate={{ scale: [0.7, 1.6], opacity: [0.8, 0] }}
-                  transition={{ delay: 1.2 + i * 0.7, duration: 1.8, repeat: Infinity, ease: "easeOut" }}
-                />
-              ))}
-              <motion.span
-                aria-hidden
-                className="pointer-events-none absolute left-1/2 top-1/2 -ml-[200px] -mt-[90px] h-[180px] w-[400px] rounded-full bg-[#f5b83d]/20 blur-3xl"
-                animate={{ opacity: [0.5, 1, 0.5], scale: [0.95, 1.08, 0.95] }}
-                transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
-              />
-            </>
-          )}
-          <motion.h2
-            className="relative font-display text-5xl font-extrabold leading-tight text-white sm:text-7xl"
-            initial={{ opacity: 0, y: reduce ? 0 : 24, scale: reduce ? 1 : 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ delay: reduce ? 0 : 1, duration: 0.5, ease: EASE }}
+        {/* headline */}
+        <motion.h2
+          className="mt-3 flex flex-col items-center font-display font-extrabold leading-none"
+          initial={{ opacity: 0, y: reduce ? 0 : 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: reduce ? 0 : 1.55, duration: 0.5, ease: EASE }}
+        >
+          <motion.span
+            className="bg-gradient-to-r from-[#4cc3f2] via-[#9fe0f8] to-[#f5b83d] bg-clip-text pb-1 text-[clamp(56px,13vh,112px)] tabular-nums text-transparent"
           >
-            <motion.span className="text-[#f5b83d] tabular-nums">{shown}</motion.span> {label}
-          </motion.h2>
-        </div>
+            {shown}
+          </motion.span>
+          <span className="mt-1 text-[clamp(22px,4vh,34px)] text-white">{label}</span>
+        </motion.h2>
 
         <motion.p
-          className="relative mt-4 max-w-md text-base text-[#9db3cf] sm:text-lg"
-          initial={{ opacity: 0, y: reduce ? 0 : 12 }}
+          className="mt-3 max-w-sm text-[15px] text-[#9db3cf] sm:text-base"
+          initial={{ opacity: 0, y: reduce ? 0 : 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: reduce ? 0.1 : 1.5, duration: 0.4, ease: EASE }}
+          transition={{ delay: reduce ? 0.1 : 2.2, duration: 0.45, ease: EASE }}
         >
           Replies go to your inbox. Track them in My emails.
         </motion.p>
@@ -245,24 +298,25 @@ export function SentCelebration({ count }: { count: number }) {
           type="button"
           onClick={leave}
           autoFocus
-          className="relative mt-8 h-11 rounded-xl bg-[#f5b83d] px-6 font-semibold text-[#071a33]"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: reduce ? 0.2 : 1.8, duration: 0.3 }}
+          className="mt-6 h-11 shrink-0 rounded-xl bg-[#f5b83d] px-6 font-semibold text-[#071a33] transition-transform hover:-translate-y-0.5"
+          initial={{ opacity: 0, y: reduce ? 0 : 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: reduce ? 0.2 : 2.6, duration: 0.4, ease: EASE }}
         >
           Back to home
         </motion.button>
       </div>
 
-      <div aria-hidden className="absolute inset-x-0 bottom-0 h-1.5 bg-white/10">
+      <div aria-hidden className="relative z-10 h-1 shrink-0 bg-white/10">
         <motion.div
-          className="h-full bg-gradient-to-r from-[#4cc3f2] via-[#3dd6a3] to-[#f5b83d]"
+          className="h-full bg-gradient-to-r from-[#4cc3f2] to-[#f5b83d]"
           style={{ originX: 0 }}
           initial={{ scaleX: 0 }}
           animate={{ scaleX: 1 }}
-          transition={{ duration: (reduce ? 2000 : TOTAL_MS) / 1000, ease: "linear" }}
+          transition={{ duration: (reduce ? REDUCED_MS : TOTAL_MS) / 1000, ease: "linear" }}
         />
       </div>
-    </motion.div>
+    </motion.div>,
+    document.body,
   );
 }

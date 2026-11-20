@@ -56,7 +56,7 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.senderId == request.auth.uid;
       // the sender can only update the reply status of their own email
       allow update: if signedIn() && resource.data.senderId == request.auth.uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["reply", "replyAt"])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["reply", "replyAt", "refusalCategory"])
         && request.resource.data.reply in ["waiting", "replied", "accepted", "refused"];
       allow delete: if false;
     }

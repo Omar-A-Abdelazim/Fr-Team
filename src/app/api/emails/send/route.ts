@@ -59,6 +59,15 @@ export async function POST(req: Request) {
     if (!subject || subject.length > 200) return json({ error: "Add a subject (up to 200 characters)." }, 400);
     if (!text || text.length > 20000) return json({ error: "The email body is empty or too long." }, 400);
 
+    // Members can only email sponsors they logged themselves.
+    if (!sponsorId) return json({ error: "Pick one of your own sponsors to email." }, 400);
+    const sp = await fetch(`${FIRESTORE}/sponsors/${encodeURIComponent(sponsorId)}`, {
+      headers: { Authorization: `Bearer ${me.token}` },
+    });
+    if (!sp.ok) return json({ error: "That sponsor wasn't found." }, 404);
+    const owner = ((await sp.json()) as { fields?: { ownerId?: { stringValue?: string } } }).fields?.ownerId?.stringValue;
+    if (owner !== me.uid) return json({ error: "You can only email sponsors you logged yourself." }, 403);
+
     const day = today();
     if ((await sentToday(me.uid, me.token, day)) >= DAILY_LIMIT) {
       return json({ error: `You've sent ${DAILY_LIMIT} emails today, the daily limit. Try again tomorrow.` }, 429);

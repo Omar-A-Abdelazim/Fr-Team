@@ -2,12 +2,12 @@
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { StatusBadge } from "@/components/app/shell";
 import { REPLY_META, formatSent } from "@/components/sent/meta";
-import { STATUS_META } from "@/lib/constants";
+import { REFUSAL_LABELS, STATUS_META } from "@/lib/constants";
 import type { EmailLog, EmailReply } from "@/lib/firebase/data";
-import type { Sponsor } from "@/types";
+import type { RefusalCategory, Sponsor } from "@/types";
 import { cn } from "@/lib/utils";
 
 const ORDER: EmailReply[] = ["waiting", "replied", "accepted", "refused"];
@@ -20,6 +20,8 @@ export function EmailPanel({
   suspended,
   onClose,
   onChange,
+  onRefuse,
+  readOnly = false,
 }: {
   email: EmailLog | null;
   sponsor: Sponsor | null;
@@ -27,7 +29,11 @@ export function EmailPanel({
   suspended: boolean;
   onClose: () => void;
   onChange: (e: EmailLog, r: EmailReply) => void;
+  onRefuse: (e: EmailLog, c: RefusalCategory) => void;
+  readOnly?: boolean;
 }) {
+  // "They said no" picked but the reason isn't saved yet
+  const [pendingFor, setPendingFor] = useState<string | null>(null);
   const reduce = useReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -71,6 +77,7 @@ export function EmailPanel({
     return () => document.removeEventListener("keydown", onKey);
   }, [isOpen, suspended, onClose]);
 
+  const refusing = !!email && pendingFor === email.id;
   const meta = sponsor ? STATUS_META[sponsor.status] : null;
 
   return (
@@ -144,11 +151,19 @@ export function EmailPanel({
                 </div>
               </div>
 
+              {readOnly ? (
+                email.reply === "refused" && (
+                  <p className="text-sm">
+                    <span className="text-muted">Refusal reason: </span>
+                    <span className="font-semibold text-coral">{email.refusalCategory ? REFUSAL_LABELS[email.refusalCategory] : "No reason saved"}</span>
+                  </p>
+                )
+              ) : (
               <fieldset disabled={busy}>
                 <legend className="mb-2 text-sm font-semibold">What happened?</legend>
                 <div className="grid grid-cols-2 gap-2">
                   {ORDER.map((r) => {
-                    const active = email.reply === r;
+                    const active = (refusing ? "refused" : email.reply) === r;
                     return (
                       <label
                         key={r}
@@ -164,7 +179,14 @@ export function EmailPanel({
                           name="reply"
                           value={r}
                           checked={active}
-                          onChange={() => onChange(email, r)}
+                          onChange={() => {
+                            if (r === "refused") {
+                              if (email.reply !== "refused") setPendingFor(email.id);
+                              return;
+                            }
+                            setPendingFor(null);
+                            onChange(email, r);
+                          }}
                           className="sr-only"
                         />
                         {REPLY_META[r].choice}
@@ -172,7 +194,31 @@ export function EmailPanel({
                     );
                   })}
                 </div>
+                {(refusing || email.reply === "refused") && (
+                  <label className="mt-4 block text-sm font-semibold">
+                    Why did they say no?
+                    <select
+                      value={refusing ? "" : (email.refusalCategory ?? "")}
+                      onChange={(ev) => {
+                        if (!ev.target.value) return;
+                        onRefuse(email, ev.target.value as RefusalCategory);
+                        setPendingFor(null);
+                      }}
+                      className="mt-1.5 h-11 w-full rounded-xl border border-line bg-raised px-3 text-sm font-normal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky"
+                    >
+                      <option value="" disabled>
+                        Pick a reason...
+                      </option>
+                      {(Object.keys(REFUSAL_LABELS) as RefusalCategory[]).map((c) => (
+                        <option key={c} value={c}>
+                          {REFUSAL_LABELS[c]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               </fieldset>
+              )}
             </div>
           </motion.div>
         </motion.div>

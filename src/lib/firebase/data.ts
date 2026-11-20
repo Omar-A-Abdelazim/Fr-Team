@@ -18,7 +18,7 @@ import { useEffect, useState } from "react";
 import { db } from "./client";
 import { POINTS } from "@/lib/constants";
 import { domainOf } from "@/lib/duplicates";
-import type { Member, Refusal, Sponsor, SponsorStatus } from "@/types";
+import type { Member, Refusal, RefusalCategory, Sponsor, SponsorStatus } from "@/types";
 
 function iso(v: unknown) {
   return v instanceof Timestamp ? v.toDate().toISOString() : typeof v === "string" ? v : new Date().toISOString();
@@ -157,10 +157,11 @@ export type EmailLog = {
   subject: string;
   body: string;
   reply: EmailReply;
+  refusalCategory?: RefusalCategory | "";
   sentAt: string;
 };
 
-/** Emails the signed-in member sent from the site, newest first. */
+/** Emails a member sent from the site, newest first. Members can read their own; admins can read anyone's. */
 export function useMyEmails(uid: string | undefined) {
   const [emails, setEmails] = useState<EmailLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -195,4 +196,26 @@ export async function setEmailReply(email: EmailLog, reply: EmailReply, sponsor?
   await updateDoc(doc(db, "emailLogs", email.id), { reply, replyAt: serverTimestamp() });
   const next = REPLY_TO_STATUS[reply];
   if (next && sponsor && by && sponsor.ownerId === by && sponsor.status !== next) await setStatus(sponsor.id, next, by);
+}
+
+/**
+ * Marks an email as refused with a reason. Also marks the linked sponsor as refused
+ * (when the member owns it) so the reason shows up in Refusal insights.
+ */
+export async function setEmailRefusal(
+  email: EmailLog,
+  category: RefusalCategory,
+  sponsor: Sponsor | null | undefined,
+  by: string,
+  details = "",
+  selfAssessment = "",
+) {
+  await updateDoc(doc(db, "emailLogs", email.id), { reply: "refused", refusalCategory: category, replyAt: serverTimestamp() });
+  if (sponsor && sponsor.ownerId === by) {
+    await setStatus(sponsor.id, "refused", by, {
+      category,
+      details: details || sponsor.refusal?.details || "",
+      memberSelfAssessment: selfAssessment || sponsor.refusal?.memberSelfAssessment || "",
+    });
+  }
 }

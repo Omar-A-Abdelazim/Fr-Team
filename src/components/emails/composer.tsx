@@ -16,7 +16,8 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { auth } from "@/lib/firebase/client";
 import { setStatus, useSponsors } from "@/lib/firebase/data";
@@ -30,7 +31,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FIELD =
   "w-full rounded-xl border border-line bg-bg px-3.5 outline-none transition-colors duration-150 focus:border-sky";
 
-type Target = { id: string; company: string; email: string; contactName: string; context: string; sponsorId?: string };
+type Target = { id: string; company: string; email: string; contactName: string; context: string; sponsorId: string };
 type Source = { title: string; url: string };
 type Status = "waiting" | "researching" | "ready" | "failed";
 type Draft = {
@@ -132,13 +133,30 @@ export function EmailComposer() {
 
   // ---- validation -------------------------------------------------------
   const filledRefs = refs.map((r) => r.trim()).filter(Boolean);
-  const validTargets = targets.filter((t) => t.company.trim() && EMAIL_RE.test(t.email.trim()));
+  const validTargets = targets.filter((t) => t.sponsorId && t.company.trim() && EMAIL_RE.test(t.email.trim()));
   const errors = {
     purpose: purpose.trim().length < 15 ? "Write at least 15 characters so the drafts have something to work from." : "",
     refs: filledRefs.length < 1 ? "Paste at least one email that worked before." : "",
     targets: validTargets.length < 1 ? "Add at least one company with a valid email." : "",
   };
   const setupOk = !errors.purpose && !errors.refs && !errors.targets;
+
+  const [session, setSession] = useState(0);
+
+  /** Wipe every piece of composer state so the next visit starts on a fresh Setup step. */
+  const resetAll = useCallback(() => {
+    setStep(0);
+    setDir(1);
+    setPurpose("");
+    setRefs([""]);
+    setTargets([]);
+    setAttempted(false);
+    setDrafts({});
+    setAiOff(false);
+    setRunning(false);
+    setStarted(false);
+    setSession((n) => n + 1);
+  }, []);
 
   function go(to: number) {
     setDir(to > step ? 1 : -1);
@@ -244,7 +262,7 @@ export function EmailComposer() {
 
       <AnimatePresence mode="wait" custom={dir} initial={false}>
         <motion.div
-          key={step}
+          key={`${session}-${step}`}
           custom={dir}
           variants={variants}
           initial="enter"
@@ -282,7 +300,7 @@ export function EmailComposer() {
               onNext={() => go(2)}
             />
           )}
-          {step === 2 && <SendStep targets={approved} drafts={drafts} sponsors={sponsors} onBack={() => go(1)} />}
+          {step === 2 && <SendStep targets={approved} drafts={drafts} sponsors={sponsors} onBack={() => go(1)} onFinish={resetAll} />}
         </motion.div>
       </AnimatePresence>
     </div>
@@ -408,8 +426,6 @@ function SetupStep({
 // Recipients
 // ---------------------------------------------------------------------------
 
-const MODES = ["From our sponsors", "Add by hand"] as const;
-
 function RecipientsSection({
   targets,
   setTargets,
@@ -423,23 +439,27 @@ function RecipientsSection({
   attempted: boolean;
   error: string;
 }) {
-  const [mode, setMode] = useState<0 | 1>(0);
+  const { profile } = useAuth();
   const [q, setQ] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
-  const [form, setForm] = useState({ company: "", email: "", contactName: "" });
-  const [formTried, setFormTried] = useState(false);
-  const added = useMemo(() => new Set(targets.map((t) => t.sponsorId).filter(Boolean)), [targets]);
+  const added = useMemo(() => new Set(targets.map((t) => t.sponsorId)), [targets]);
+
+  const mine = useMemo(
+    () => (profile ? sponsors.filter((s) => s.ownerId === profile.id) : []),
+    [sponsors, profile],
+  );
+  const hasAnyEmail = mine.some((s) => !!s.email);
 
   const matches = useMemo(() => {
     const n = q.trim().toLowerCase();
-    return sponsors
+    return mine
       .filter((s) => !added.has(s.id))
       .filter((s) => !n || s.name.toLowerCase().includes(n) || (s.email ?? "").toLowerCase().includes(n))
-      .slice(0, 40);
-  }, [sponsors, q, added]);
+      .slice(0, 60);
+  }, [mine, q, added]);
 
   function addPicked() {
-    const rows = sponsors
+    const rows = mine
       .filter((s) => picked.includes(s.id) && s.email)
       .map<Target>((s) => ({
         id: uid(),
@@ -454,58 +474,27 @@ function RecipientsSection({
     toast.success(`${rows.length} ${rows.length === 1 ? "recipient" : "recipients"} added`);
   }
 
-  const formErrors = {
-    company: form.company.trim() ? "" : "Enter the company name.",
-    email: EMAIL_RE.test(form.email.trim()) ? "" : "Enter a valid email, like name@company.com.",
-  };
-
-  function addManual(e: React.FormEvent) {
-    e.preventDefault();
-    setFormTried(true);
-    if (formErrors.company || formErrors.email) return;
-    setTargets((prev) => [
-      ...prev,
-      { id: uid(), company: form.company.trim(), email: form.email.trim(), contactName: form.contactName.trim(), context: "" },
-    ]);
-    setForm({ company: "", email: "", contactName: "" });
-    setFormTried(false);
-  }
-
   return (
     <section className="space-y-4 rounded-2xl border border-line bg-raised p-5 sm:p-6">
       <div>
         <h2 className="font-display text-lg font-bold">Recipients</h2>
-        <p className="text-sm text-muted">Pick sponsors the team already logged, or add a company by hand.</p>
+        <p className="text-sm text-muted">You can email the sponsors you logged yourself.</p>
       </div>
 
-      <div role="tablist" aria-label="How to add recipients" className="relative grid grid-cols-2 rounded-xl border border-line bg-bg p-1">
-        {MODES.map((m, i) => (
-          <button
-            key={m}
-            type="button"
-            role="tab"
-            aria-selected={mode === i}
-            onClick={() => setMode(i as 0 | 1)}
-            className={cn(
-              "relative z-10 h-10 rounded-lg text-sm font-semibold transition-colors duration-150",
-              mode === i ? "text-[#071a33]" : "text-muted hover:text-fg",
-            )}
+      {!hasAnyEmail && targets.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-line p-6 text-center">
+          <p className="font-semibold">Log a sponsor with an email first</p>
+          <p className="mt-1 text-sm text-muted">Sponsors you add in My sponsors show up here.</p>
+          <Link
+            href="/app"
+            className="mt-4 inline-flex h-10 items-center rounded-xl bg-sky px-4 text-sm font-semibold text-[#071a33]"
           >
-            {mode === i && (
-              <motion.span
-                layoutId="recipient-pill"
-                className="absolute inset-0 -z-10 rounded-lg bg-sky"
-                transition={{ duration: 0.25, ease: EASE }}
-              />
-            )}
-            {m}
-          </button>
-        ))}
-      </div>
-
-      {mode === 0 ? (
+            Go to My sponsors
+          </Link>
+        </div>
+      ) : (
         <div className="rounded-xl border border-line bg-bg p-4">
-          <Field label="Search sponsors">
+          <Field label="Search your sponsors">
             <span className="relative block">
               <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" />
               <input
@@ -517,7 +506,7 @@ function RecipientsSection({
             </span>
           </Field>
           <ul className="mt-3 max-h-56 divide-y divide-line overflow-y-auto rounded-xl border border-line bg-raised">
-            {matches.length === 0 && <li className="px-4 py-3 text-sm text-muted">No logged sponsors match.</li>}
+            {matches.length === 0 && <li className="px-4 py-3 text-sm text-muted">No sponsors match.</li>}
             {matches.map((s) => {
               const noEmail = !s.email;
               return (
@@ -537,7 +526,9 @@ function RecipientsSection({
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">{s.name}</span>
-                      <span className="block truncate text-xs text-muted">{noEmail ? "No email saved" : s.email}</span>
+                      <span className="block truncate text-xs text-muted">
+                        {noEmail ? "No email saved — add it in My sponsors" : s.email}
+                      </span>
                     </span>
                   </label>
                 </li>
@@ -553,29 +544,12 @@ function RecipientsSection({
             <Plus className="size-4" /> Add {picked.length || ""} selected {picked.length === 1 ? "sponsor" : "sponsors"}
           </button>
         </div>
-      ) : (
-        <form onSubmit={addManual} noValidate className="rounded-xl border border-line bg-bg p-4">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Company" error={formTried ? formErrors.company : ""}>
-              <input dir="auto" value={form.company} onChange={(e) => setForm((f) => ({ ...f, company: e.target.value }))} className={cn(FIELD, "h-11 bg-raised")} />
-            </Field>
-            <Field label="Email" error={formTried ? formErrors.email : ""}>
-              <input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} className={cn(FIELD, "h-11 bg-raised")} />
-            </Field>
-            <Field label="Contact name (optional)">
-              <input dir="auto" value={form.contactName} onChange={(e) => setForm((f) => ({ ...f, contactName: e.target.value }))} className={cn(FIELD, "h-11 bg-raised")} />
-            </Field>
-          </div>
-          <button type="submit" className="mt-3 inline-flex h-10 items-center gap-2 rounded-xl bg-sky px-4 text-sm font-semibold text-[#071a33]">
-            <Plus className="size-4" /> Add
-          </button>
-        </form>
       )}
 
       <div>
         <h3 className="mb-2 text-sm font-semibold">Chosen recipients ({targets.length})</h3>
         {targets.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-line p-4 text-sm text-muted">Nobody yet. Pick a sponsor or add one by hand.</p>
+          <p className="rounded-xl border border-dashed border-line p-4 text-sm text-muted">Nobody yet. Pick a sponsor from the list.</p>
         ) : (
           <ul className="space-y-2">
             <AnimatePresence initial={false}>
@@ -591,10 +565,7 @@ function RecipientsSection({
                 >
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold">{t.company}</p>
-                    <p className="truncate text-xs text-muted">
-                      {t.email}
-                      {t.contactName ? ` · ${t.contactName}` : ""}
-                    </p>
+                    <p className="truncate text-xs text-muted">{t.email}</p>
                   </div>
                   <button
                     type="button"
@@ -907,11 +878,13 @@ function SendStep({
   drafts,
   sponsors,
   onBack,
+  onFinish,
 }: {
   targets: Target[];
   drafts: Record<string, Draft>;
   sponsors: ReturnType<typeof useSponsors>["sponsors"];
   onBack: () => void;
+  onFinish: () => void;
 }) {
   const { profile } = useAuth();
   const [states, setStates] = useState<Record<string, SendState>>({});
@@ -1016,7 +989,7 @@ function SendStep({
         )}
       </AnimatePresence>
 
-      <AnimatePresence>{allSent && <SentCelebration key="celebrate" count={sentCount} />}</AnimatePresence>
+      <AnimatePresence>{allSent && <SentCelebration key="celebrate" count={sentCount} onFinish={onFinish} />}</AnimatePresence>
 
       {targets.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-line p-8 text-center">

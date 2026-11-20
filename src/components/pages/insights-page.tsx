@@ -102,7 +102,7 @@ export function InsightsPage() {
               className="overflow-hidden"
             >
               <ul className="list-disc space-y-2 border-t border-line py-3 pl-9 pr-4 text-sm text-muted">
-                <li>Click a member to see why sponsors said no to them, in their own words and with their own take.</li>
+                <li>Click a member to open their profile and see why sponsors said no to them, in their own words and with their own take.</li>
                 <li>Generate a summary for one member or for the whole team before FR meetings.</li>
                 <li>Use it to decide what to change in the proposal and who needs coaching.</li>
               </ul>
