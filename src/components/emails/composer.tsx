@@ -17,6 +17,7 @@ import {
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { auth } from "@/lib/firebase/client";
@@ -118,6 +119,11 @@ function Stepper({ step }: { step: number }) {
 export function EmailComposer() {
   const reduce = useReducedMotion();
   const { sponsors } = useSponsors();
+  const { profile } = useAuth();
+  const params = useSearchParams();
+  const toParam = params.get("to");
+  const quickApplied = useRef(false);
+  const [quickNote, setQuickNote] = useState(0);
 
   const [step, setStep] = useState(0);
   const [dir, setDir] = useState(1);
@@ -143,6 +149,22 @@ export function EmailComposer() {
 
   const [session, setSession] = useState(0);
 
+  // Quick send: /app/emails?to=id1,id2 preselects the member's own sponsors that have an email.
+  useEffect(() => {
+    if (quickApplied.current || !toParam || !profile || sponsors.length === 0) return;
+    quickApplied.current = true;
+    const ids = new Set(toParam.split(",").map((x) => x.trim()).filter(Boolean));
+    const rows = sponsors
+      .filter((s) => ids.has(s.id) && s.ownerId === profile.id && !!s.email)
+      .map<Target>((s) => ({ id: uid(), company: s.name, email: s.email, contactName: "", context: s.description, sponsorId: s.id }));
+    if (rows.length === 0) return;
+    // Sponsors load asynchronously, so this one-time preselect has to run after they arrive.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setTargets((prev) => [...prev, ...rows.filter((r) => !prev.some((p) => p.sponsorId === r.sponsorId))]);
+    setQuickNote(rows.length);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [toParam, profile, sponsors]);
+
   /** Wipe every piece of composer state so the next visit starts on a fresh Setup step. */
   const resetAll = useCallback(() => {
     setStep(0);
@@ -155,6 +177,7 @@ export function EmailComposer() {
     setAiOff(false);
     setRunning(false);
     setStarted(false);
+    setQuickNote(0);
     setSession((n) => n + 1);
   }, []);
 
@@ -259,6 +282,21 @@ export function EmailComposer() {
       </header>
 
       <Stepper step={step} />
+
+      {quickNote > 0 && step === 0 && (
+        <div role="status" className="flex items-center justify-between gap-3 rounded-xl border border-line bg-raised px-4 py-2.5 text-sm">
+          <span>
+            {quickNote} {quickNote === 1 ? "sponsor" : "sponsors"} added from My emails
+          </span>
+          <button
+            type="button"
+            onClick={() => setQuickNote(0)}
+            className="inline-flex h-10 items-center rounded-lg px-3 font-semibold text-sky focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <AnimatePresence mode="wait" custom={dir} initial={false}>
         <motion.div

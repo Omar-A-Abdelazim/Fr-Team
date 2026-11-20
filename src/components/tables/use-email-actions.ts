@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
-import { setEmailRefusal, setEmailReply, type EmailLog, type EmailReply } from "@/lib/firebase/data";
+import { setEmailRefusal, setEmailReply, setStatus, type EmailLog, type EmailReply } from "@/lib/firebase/data";
 import { REFUSAL_LABELS } from "@/lib/constants";
 import type { Refusal, Sponsor } from "@/types";
 
@@ -59,7 +59,50 @@ export function useEmailActions(ownerId: string | undefined, sponsors: Sponsor[]
     [ownerId, busy, sponsorOf],
   );
 
-  return { busy, change, refuse };
+  /** Reply change for a sponsor that has no email yet: maps straight onto the sponsor status. */
+  const changeSponsor = useCallback(
+    async (sponsor: Sponsor, reply: EmailReply, emailed: boolean) => {
+      if (!ownerId || reply === "refused" || busy) return;
+      const next = reply === "waiting" ? (emailed ? "contacted" : "not_contacted") : reply === "replied" ? "replied" : "accepted";
+      if (sponsor.status === next) return;
+      setBusy(true);
+      try {
+        await setStatus(sponsor.id, next, ownerId);
+        if (reply === "accepted") {
+          const { default: confetti } = await import("canvas-confetti");
+          confetti({ particleCount: 140, spread: 80, origin: { y: 0.6 }, colors: ["#f5b83d", "#4cc3f2", "#3dd6a3", "#ffffff"] });
+          toast.success("Deal won!", { description: `${sponsor.name} agreed. Nice work!` });
+        } else {
+          toast.success(`Marked as ${REPLY_LABEL[reply].toLowerCase()}`);
+        }
+      } catch (e) {
+        toast.error(`Couldn't update ${sponsor.name}. Check your connection and try again.`, { description: why(e) });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [ownerId, busy],
+  );
+
+  const refuseSponsor = useCallback(
+    async (sponsor: Sponsor, r: Refusal) => {
+      if (!ownerId || busy) return false;
+      setBusy(true);
+      try {
+        await setStatus(sponsor.id, "refused", ownerId, r);
+        toast.success(`Refusal saved for ${sponsor.name}`, { description: `Reason: ${REFUSAL_LABELS[r.category]}` });
+        return true;
+      } catch (e) {
+        toast.error(`Couldn't save the refusal for ${sponsor.name}.`, { description: why(e) });
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [ownerId, busy],
+  );
+
+  return { busy, change, refuse, changeSponsor, refuseSponsor };
 }
 
 function why(e: unknown) {

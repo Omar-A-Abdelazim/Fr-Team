@@ -255,8 +255,8 @@ export function MemberProfile() {
           )}
 
           {tab === "emails" &&
-            (emails.length === 0 ? (
-              <p className="rounded-3xl border border-dashed border-line p-10 text-center text-muted">{first} hasn&apos;t sent any emails from FR Hub yet.</p>
+            (emails.length === 0 && mine.length === 0 ? (
+              <p className="rounded-3xl border border-dashed border-line p-10 text-center text-muted">{first} hasn&apos;t logged any sponsors or sent emails yet.</p>
             ) : (
               <EmailsTable readOnly ownerId={uid} emails={emails} sponsors={sponsors} onOpen={(e) => setOpenId(e.id)} />
             ))}

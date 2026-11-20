@@ -7,12 +7,12 @@ import { Envelope, Spark } from "@/components/auth/shapes";
 import { CountUp } from "@/components/motion/count-up";
 import { EmailPanel } from "@/components/sent/email-panel";
 import { REPLY_META } from "@/components/sent/meta";
-import { EmailsTable } from "@/components/tables/emails-table";
-import { REPLY_LABEL, useEmailActions } from "@/components/tables/use-email-actions";
+import { EmailsTable, buildRows } from "@/components/tables/emails-table";
+import { useEmailActions } from "@/components/tables/use-email-actions";
 import { useAuth } from "@/lib/firebase/auth-context";
-import { useMyEmails, useSponsors, linkEmails, type EmailReply } from "@/lib/firebase/data";
+import { useMyEmails, useSponsors, linkEmails } from "@/lib/firebase/data";
 
-const TILES: EmailReply[] = ["waiting", "replied", "accepted", "refused"];
+type Tile = { key: string; label: string; color: string; value: number };
 
 export function MyEmails() {
   const { profile } = useAuth();
@@ -23,12 +23,17 @@ export function MyEmails() {
   const [openId, setOpenId] = useState<string | null>(null);
   const { busy, change, refuse } = useEmailActions(uid, sponsors);
 
-  const counts = useMemo(() => {
-    const c: Record<EmailReply, number> = { waiting: 0, replied: 0, accepted: 0, refused: 0 };
-    for (const e of emails) c[e.reply] += 1;
-    return c;
-  }, [emails]);
-
+  const tiles = useMemo<Tile[]>(() => {
+    const rows = uid ? buildRows(emails, sponsors, uid) : [];
+    const emailed = rows.filter((r) => r.email).length;
+    return [
+      { key: "sponsors", label: "Sponsors", color: "var(--fg)", value: rows.filter((r) => r.sponsor).length },
+      { key: "emailed", label: "Emailed", color: REPLY_META.replied.color, value: emailed },
+      { key: "not", label: "Not emailed yet", color: REPLY_META.waiting.color, value: rows.length - emailed },
+      { key: "agreed", label: "Agreed", color: REPLY_META.accepted.color, value: rows.filter((r) => r.reply === "accepted").length },
+      { key: "no", label: "Said no", color: REPLY_META.refused.color, value: rows.filter((r) => r.reply === "refused").length },
+    ];
+  }, [emails, sponsors, uid]);
   const open = emails.find((e) => e.id === openId) ?? null;
 
   return (
@@ -36,15 +41,15 @@ export function MyEmails() {
       <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h1 className="font-display text-3xl font-bold sm:text-4xl">My emails</h1>
-          <p className="mt-1.5 max-w-md text-muted">Everything you sent from FR Hub. Update each one when they reply.</p>
+          <p className="mt-1.5 max-w-md text-muted">Every sponsor you logged, sent or not. Update each one when they reply.</p>
         </div>
-        <dl className="grid grid-cols-4 gap-2 sm:gap-3 lg:w-[26rem]">
-          {TILES.map((k) => (
-            <div key={k} className="rounded-2xl border border-line bg-raised px-2.5 py-3 sm:px-4">
-              <dd className="font-display text-2xl font-extrabold leading-none sm:text-3xl" style={{ color: REPLY_META[k].color }}>
-                {loading ? <span className="inline-block h-6 w-6 animate-pulse rounded bg-fg/10" /> : <CountUp to={counts[k]} duration={0.9} />}
+        <dl className="grid grid-cols-3 gap-2 sm:grid-cols-5 sm:gap-3 lg:w-[34rem]">
+          {tiles.map((t) => (
+            <div key={t.key} className="rounded-2xl border border-line bg-raised px-2.5 py-3 sm:px-4">
+              <dd className="font-display text-2xl font-extrabold leading-none sm:text-3xl" style={{ color: t.color }}>
+                {loading ? <span className="inline-block h-6 w-6 animate-pulse rounded bg-fg/10" /> : <CountUp to={t.value} duration={0.9} />}
               </dd>
-              <dt className="mt-1.5 truncate text-xs font-medium text-muted sm:text-sm">{REPLY_LABEL[k]}</dt>
+              <dt className="mt-1.5 truncate text-xs font-medium text-muted sm:text-sm">{t.label}</dt>
             </div>
           ))}
         </dl>
@@ -52,7 +57,7 @@ export function MyEmails() {
 
       {loading || !uid ? (
         <div className="h-72 animate-pulse rounded-2xl border border-line bg-raised" aria-busy="true" aria-label="Loading emails" />
-      ) : emails.length === 0 ? (
+      ) : emails.length === 0 && !sponsors.some((s) => s.ownerId === uid) ? (
         <EmptyState />
       ) : (
         <EmailsTable emails={emails} sponsors={sponsors} ownerId={uid} onOpen={(e) => setOpenId(e.id)} />
@@ -90,10 +95,10 @@ function EmptyState() {
           <Spark size={16} />
         </motion.div>
       </div>
-      <h2 className="font-display text-2xl font-bold">You haven&apos;t sent anything yet</h2>
-      <p className="mt-1.5 max-w-sm text-muted">Emails you send from FR Hub show up here, so you can track who replied.</p>
-      <Link href="/app/emails" className="mt-6 inline-flex h-11 items-center rounded-full bg-gold px-6 font-semibold text-[#071a33]">
-        Write your first email
+      <h2 className="font-display text-2xl font-bold">No sponsors yet</h2>
+      <p className="mt-1.5 max-w-sm text-muted">Log a sponsor in My sponsors, then email them from here and track who replied.</p>
+      <Link href="/app" className="mt-6 inline-flex h-11 items-center rounded-full bg-gold px-6 font-semibold text-[#071a33]">
+        Go to My sponsors
       </Link>
     </div>
   );
