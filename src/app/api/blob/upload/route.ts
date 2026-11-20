@@ -1,5 +1,9 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
+import { connection } from "next/server";
 import { callerFromToken, isFail, json } from "@/lib/server/auth";
+
+// Newer Vercel Blob stores connect with BLOB_STORE_ID (+ Vercel OIDC); older ones with a read-write token.
+const blobEnabled = () => !!(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
 
 // Issues short-lived upload tokens so the browser can upload proposals straight to Vercel Blob
 // (bypassing the ~4.5 MB request limit of server functions). Only approved members may upload.
@@ -7,11 +11,12 @@ import { callerFromToken, isFail, json } from "@/lib/server/auth";
 const MAX = 20 * 1024 * 1024; // Gmail allows 25 MB per email in total
 
 export async function GET() {
-  return json({ enabled: !!process.env.BLOB_READ_WRITE_TOKEN, maxBytes: MAX });
+  await connection(); // read env at request time, not at build time
+  return json({ enabled: blobEnabled(), maxBytes: MAX });
 }
 
 export async function POST(req: Request) {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) return json({ error: "File storage isn't set up yet." }, 503);
+  if (!blobEnabled()) return json({ error: "File storage isn't set up yet." }, 503);
   const body = (await req.json()) as HandleUploadBody;
   try {
     const result = await handleUpload({
