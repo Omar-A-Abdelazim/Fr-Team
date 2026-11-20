@@ -234,3 +234,28 @@ export async function rejectUser(uid: string, by: string) {
 export async function setUserRole(uid: string, role: "member" | "admin") {
   await updateDoc(doc(db, "users", uid), { role });
 }
+
+/**
+ * One-time cleanup before the real team starts: deletes every sponsor, duplicate key and email log,
+ * and every non-admin profile. Admin profiles stay. Firestore rules only allow this for admins.
+ */
+export async function resetAllData(onProgress?: (done: number, total: number) => void) {
+  const { getDocs, collection: col } = await import("firebase/firestore");
+  const targets = [];
+  for (const name of ["sponsors", "sponsorKeys", "emailLogs"]) {
+    const snap = await getDocs(col(db, name));
+    targets.push(...snap.docs.map((d) => d.ref));
+  }
+  const users = await getDocs(col(db, "users"));
+  targets.push(...users.docs.filter((d) => d.data().role !== "admin").map((d) => d.ref));
+
+  let done = 0;
+  for (let i = 0; i < targets.length; i += 400) {
+    const batch = writeBatch(db);
+    targets.slice(i, i + 400).forEach((r) => batch.delete(r));
+    await batch.commit();
+    done += Math.min(400, targets.length - i);
+    onProgress?.(done, targets.length);
+  }
+  return targets.length;
+}

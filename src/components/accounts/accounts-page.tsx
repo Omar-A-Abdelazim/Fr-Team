@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/firebase/auth-context";
 import { approveUser, rejectUser, setUserRole, useMembers, useSponsors } from "@/lib/firebase/data";
 import type { Member } from "@/types";
 import { Coin, Spark } from "@/components/auth/shapes";
+import { ResetData } from "@/components/accounts/reset-data";
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 
@@ -401,6 +402,8 @@ export function AccountsPage() {
           )}
         </AnimatePresence>
       </section>
+
+      <ResetData />
     </div>
   );
 }
