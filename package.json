@@ -15,7 +15,6 @@
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
     "firebase": "^13.4.0",
-    "firebase-admin": "^14.5.1",
     "framer-motion": "^14.14.0",
     "lucide-react": "^1.76.0",
     "next": "16.4.6",
@@ -35,8 +34,5 @@
     "eslint-config-next": "16.4.6",
     "tailwindcss": "4.3.3",
     "typescript": "^5"
-  },
-  "engines": {
-    "node": "22.x"
   }
 }

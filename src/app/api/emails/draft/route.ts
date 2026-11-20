@@ -26,6 +26,33 @@ function parseModelJson(text: string): { subject: string; body: string; research
   }
 }
 
+const FB_API_KEY = process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "AIzaSyBuSIg7u4MSItU4H7c3EksLPeTdt_kN66w";
+const FB_PROJECT = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? "ieee-met-fr-hub";
+
+/**
+ * Verifies the Firebase ID token with Google's Identity Toolkit, then reads the caller's role
+ * from Firestore using their own token (the rules stop anyone from changing their role).
+ */
+async function verifyAdmin(token: string): Promise<{ uid: string } | { error: string; status: number }> {
+  const look = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FB_API_KEY}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idToken: token }),
+  });
+  if (!look.ok) return { error: "Your session expired. Sign in again.", status: 401 };
+  const uid = ((await look.json()) as { users?: { localId?: string }[] }).users?.[0]?.localId;
+  if (!uid) return { error: "Your session expired. Sign in again.", status: 401 };
+
+  const doc = await fetch(
+    `https://firestore.googleapis.com/v1/projects/${FB_PROJECT}/databases/(default)/documents/users/${uid}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!doc.ok) return { error: `Couldn't check your permissions (${doc.status}).`, status: 500 };
+  const role = ((await doc.json()) as { fields?: { role?: { stringValue?: string } } }).fields?.role?.stringValue;
+  if (role !== "admin") return { error: "Admins only.", status: 403 };
+  return { uid };
+}
+
 export async function POST(req: Request) {
   try {
     return await handle(req);
@@ -35,33 +62,12 @@ export async function POST(req: Request) {
 }
 
 async function handle(req: Request) {
-  // Imported here so a failure while loading firebase-admin is reported instead of crashing the route.
-  let mod: typeof import("@/lib/firebase/admin");
-  try {
-    mod = await import("@/lib/firebase/admin");
-  } catch (e) {
-    return json({ error: `Couldn't load Firebase admin: ${(e as Error).message}`.slice(0, 240) }, 500);
-  }
-  const { adminAuth, adminDb, adminInitError } = mod;
-  if (!adminAuth || !adminDb) return json({ error: adminInitError ?? "Server isn't configured" }, 500);
-
   const header = req.headers.get("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
   if (!token) return json({ error: "Sign in again to continue." }, 401);
 
-  let uid: string;
-  try {
-    uid = (await adminAuth.verifyIdToken(token)).uid;
-  } catch (e) {
-    return json({ error: `Couldn't verify your sign-in: ${(e as Error).message}`.slice(0, 240) }, 401);
-  }
-
-  try {
-    const snap = await adminDb.doc(`users/${uid}`).get();
-    if (snap.data()?.role !== "admin") return json({ error: "Admins only." }, 403);
-  } catch (e) {
-    return json({ error: `Couldn't check your permissions: ${(e as Error).message}`.slice(0, 240) }, 500);
-  }
+  const who = await verifyAdmin(token);
+  if ("error" in who) return json({ error: who.error }, who.status);
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return json({ error: "Gemini not configured" }, 503);
