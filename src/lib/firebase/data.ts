@@ -78,7 +78,13 @@ export type NewSponsor = Pick<
   "name" | "partnerType" | "website" | "email" | "phone" | "facebook" | "linkedin" | "description"
 >;
 
-export async function createSponsor(input: NewSponsor, owner: { id: string; name: string }) {
+/** New sponsors are approved with points right away, unless the member overrode a possible-duplicate warning. */
+export async function createSponsor(
+  input: NewSponsor,
+  owner: { id: string; name: string },
+  possibleDuplicate = false,
+) {
+  const approved = !possibleDuplicate;
   const ref = doc(collection(db, "sponsors"));
   const batch = writeBatch(db);
   batch.set(ref, {
@@ -88,9 +94,9 @@ export async function createSponsor(input: NewSponsor, owner: { id: string; name
     ownerName: owner.name,
     status: "not_contacted",
     refusal: null,
-    approved: false,
+    approved,
     reviewed: false,
-    points: 0,
+    points: approved ? POINTS[input.partnerType] : 0,
     statusHistory: [],
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -124,7 +130,10 @@ export async function approveSponsor(id: string) {
     const snap = await tx.get(ref);
     const s = snap.data() as Sponsor | undefined;
     if (!s) throw new Error("This sponsor no longer exists.");
-    if (s.approved) return 0;
+    if (s.approved) {
+      tx.update(ref, { reviewed: true });
+      return 0;
+    }
     const pts = POINTS[s.partnerType] ?? 0;
     tx.update(ref, { approved: true, reviewed: true, points: pts, approvedAt: serverTimestamp() });
     return pts;

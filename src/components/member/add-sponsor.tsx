@@ -61,7 +61,7 @@ export function AddSponsor({
 }: {
   open: boolean;
   onClose: () => void;
-  onSave: (d: Draft) => Promise<boolean>;
+  onSave: (d: Draft, possibleDuplicate: boolean) => Promise<boolean>;
   pool: Sponsor[];
 }) {
   const [d, setD] = useState<Draft>(EMPTY);
@@ -249,7 +249,7 @@ export function AddSponsor({
                 onClick={async () => {
                   if (step < STEPS.length - 1) return setStep((s) => s + 1);
                   setSaving(true);
-                  const ok = await onSave(d);
+                  const ok = await onSave(d, !!dup);
                   setSaving(false);
                   if (ok) close();
                 }}

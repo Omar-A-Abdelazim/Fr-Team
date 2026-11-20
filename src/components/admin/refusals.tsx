@@ -7,7 +7,18 @@ import type { computeRefusals } from "./stats";
 
 type Refusals = ReturnType<typeof computeRefusals>;
 
-export function RefusalPanel({ data }: { data: Refusals }) {
+export function RefusalPanel({
+  data,
+  onSummarize,
+  summarizing = false,
+  summaryHint,
+}: {
+  data: Refusals;
+  onSummarize?: () => void;
+  summarizing?: boolean;
+  summaryHint?: string;
+}) {
+  const disabled = !onSummarize || summarizing || !!summaryHint;
   return (
     <section className="rounded-3xl border border-line bg-raised p-6 sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -15,14 +26,22 @@ export function RefusalPanel({ data }: { data: Refusals }) {
           <h2 className="font-display text-xl font-bold">Why sponsors said no</h2>
           <p className="mt-1 text-sm text-muted">{data.total} refusal{data.total === 1 ? "" : "s"} in this period</p>
         </div>
-        <button
-          type="button"
-          disabled
-          title="Available after Gemini is connected"
-          className="inline-flex cursor-not-allowed items-center gap-2 rounded-full border border-line px-3.5 py-1.5 text-sm font-medium text-muted opacity-60"
-        >
-          <Sparkles className="size-4" /> Generate AI summary
-        </button>
+        <div className="flex flex-col items-start gap-1 sm:items-end">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onSummarize}
+            aria-describedby={summaryHint ? "summary-hint" : undefined}
+            className="inline-flex h-10 items-center gap-2 rounded-full border border-line px-4 text-sm font-medium transition-colors duration-150 hover:bg-fg/5 disabled:cursor-not-allowed disabled:text-muted disabled:opacity-60"
+          >
+            <Sparkles className="size-4" /> {summarizing ? "Writing summary…" : "Generate AI summary"}
+          </button>
+          {summaryHint && (
+            <span id="summary-hint" className="text-xs text-muted">
+              {summaryHint}
+            </span>
+          )}
+        </div>
       </div>
 
       {data.rows.length === 0 ? (

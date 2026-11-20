@@ -8,13 +8,15 @@ import {
   Copy,
   ExternalLink,
   Mail,
+  Loader2,
   Plus,
   RefreshCw,
   Search,
+  Send,
   Sparkles,
   Trash2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { auth } from "@/lib/firebase/client";
 import { useSponsors } from "@/lib/firebase/data";
@@ -40,7 +42,6 @@ type Draft = {
 };
 
 const uid = () => Math.random().toString(36).slice(2, 10);
-const blankTarget = (): Target => ({ id: uid(), company: "", email: "", contactName: "", context: "" });
 const blankDraft = (status: Status = "waiting"): Draft => ({
   status,
   subject: "",
@@ -119,7 +120,7 @@ export function EmailComposer() {
   const [dir, setDir] = useState(1);
   const [purpose, setPurpose] = useState("");
   const [refs, setRefs] = useState<string[]>([""]);
-  const [targets, setTargets] = useState<Target[]>([blankTarget()]);
+  const [targets, setTargets] = useState<Target[]>([]);
   const [attempted, setAttempted] = useState(false);
 
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -234,7 +235,7 @@ export function EmailComposer() {
     <div className="mx-auto w-full max-w-4xl space-y-6">
       <header>
         <h1 className="font-display text-3xl font-bold">Email composer</h1>
-        <p className="mt-1 text-muted">Research each company, draft a personal email, then send it from Gmail.</p>
+        <p className="mt-1 text-muted">Research each company, draft a personal email, then send it.</p>
       </header>
 
       <Stepper step={step} />
@@ -313,41 +314,6 @@ function SetupStep({
   errors: { purpose: string; refs: string; targets: string };
   onContinue: () => void;
 }) {
-  const [q, setQ] = useState("");
-  const [picked, setPicked] = useState<string[]>([]);
-  const logged = new Set(targets.map((t) => t.sponsorId).filter(Boolean));
-
-  const matches = useMemo(() => {
-    const n = q.trim().toLowerCase();
-    return sponsors
-      .filter((s) => !logged.has(s.id))
-      .filter((s) => !n || s.name.toLowerCase().includes(n) || s.email.toLowerCase().includes(n))
-      .slice(0, 30);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sponsors, q, targets]);
-
-  function addPicked() {
-    const rows = sponsors
-      .filter((s) => picked.includes(s.id))
-      .map<Target>((s) => ({
-        id: uid(),
-        company: s.name,
-        email: s.email,
-        contactName: "",
-        context: s.description,
-        sponsorId: s.id,
-      }));
-    setTargets((prev) => {
-      const base = prev.length === 1 && !prev[0].company && !prev[0].email ? [] : prev;
-      return [...base, ...rows];
-    });
-    setPicked([]);
-    toast.success(`${rows.length} ${rows.length === 1 ? "company" : "companies"} added`);
-  }
-
-  const updateTarget = (id: string, p: Partial<Target>) =>
-    setTargets((prev) => prev.map((t) => (t.id === id ? { ...t, ...p } : t)));
-
   return (
     <div className="space-y-6">
       <section className="space-y-4 rounded-2xl border border-line bg-raised p-5 sm:p-6">
@@ -421,105 +387,7 @@ function SetupStep({
         )}
       </section>
 
-      <section className="space-y-4 rounded-2xl border border-line bg-raised p-5 sm:p-6">
-        <h2 className="font-display text-lg font-bold">Who are you sending to?</h2>
-
-        <div className="rounded-xl border border-line bg-bg p-4">
-          <Field label="Pick from logged sponsors">
-            <span className="relative block">
-              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                className={cn(FIELD, "h-11 bg-raised pl-10")}
-                placeholder="Search by company or email"
-              />
-            </span>
-          </Field>
-          <ul className="mt-3 max-h-52 divide-y divide-line overflow-y-auto rounded-xl border border-line bg-raised">
-            {matches.length === 0 && <li className="px-4 py-3 text-sm text-muted">No logged sponsors match.</li>}
-            {matches.map((s) => (
-              <li key={s.id}>
-                <label className="flex min-h-11 cursor-pointer items-center gap-3 px-4 py-2 hover:bg-fg/5">
-                  <input
-                    type="checkbox"
-                    checked={picked.includes(s.id)}
-                    onChange={(e) => setPicked((p) => (e.target.checked ? [...p, s.id] : p.filter((x) => x !== s.id)))}
-                    className="size-4 accent-[var(--sky)]"
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{s.name}</span>
-                    <span className="block truncate text-xs text-muted">{s.email || "No email logged"}</span>
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
-          <button
-            type="button"
-            disabled={picked.length === 0}
-            onClick={addPicked}
-            className="mt-3 inline-flex h-10 items-center gap-2 rounded-xl bg-sky px-4 text-sm font-semibold text-[#071a33] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <Plus className="size-4" /> Add {picked.length || ""} selected {picked.length === 1 ? "sponsor" : "sponsors"}
-          </button>
-        </div>
-
-        <ul className="space-y-3">
-          <AnimatePresence initial={false}>
-            {targets.map((t, i) => (
-              <motion.li
-                key={t.id}
-                layout
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.25, ease: EASE }}
-                className="rounded-xl border border-line bg-bg p-4"
-              >
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <Field label="Company">
-                    <input dir="auto" value={t.company} onChange={(e) => updateTarget(t.id, { company: e.target.value })} className={cn(FIELD, "h-11")} />
-                  </Field>
-                  <Field
-                    label="Email"
-                    error={t.email && !EMAIL_RE.test(t.email.trim()) ? "This doesn't look like an email address." : ""}
-                  >
-                    <input type="email" value={t.email} onChange={(e) => updateTarget(t.id, { email: e.target.value })} className={cn(FIELD, "h-11")} />
-                  </Field>
-                  <Field label="Contact name (optional)">
-                    <input dir="auto" value={t.contactName} onChange={(e) => updateTarget(t.id, { contactName: e.target.value })} className={cn(FIELD, "h-11")} />
-                  </Field>
-                </div>
-                {t.context && (
-                  <p className="mt-2 line-clamp-2 text-xs text-muted">Context from the sponsor log: {t.context}</p>
-                )}
-                {targets.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setTargets((p) => p.filter((x) => x.id !== t.id))}
-                    className="mt-2 inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-sm text-muted hover:text-coral"
-                  >
-                    <Trash2 className="size-4" /> Remove recipient {i + 1}
-                  </button>
-                )}
-              </motion.li>
-            ))}
-          </AnimatePresence>
-        </ul>
-        {attempted && errors.targets && (
-          <p role="alert" className="text-xs text-coral">
-            {errors.targets}
-          </p>
-        )}
-        <button
-          type="button"
-          onClick={() => setTargets((p) => [...p, blankTarget()])}
-          className="inline-flex h-10 items-center gap-2 rounded-xl border border-line px-4 text-sm font-semibold hover:bg-fg/5"
-        >
-          <Plus className="size-4" /> Add recipient
-        </button>
-      </section>
+      <RecipientsSection targets={targets} setTargets={setTargets} sponsors={sponsors} attempted={attempted} error={errors.targets} />
 
       <div className="flex justify-end">
         <button
@@ -531,6 +399,221 @@ function SetupStep({
         </button>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Recipients
+// ---------------------------------------------------------------------------
+
+const MODES = ["From our sponsors", "Add by hand"] as const;
+
+function RecipientsSection({
+  targets,
+  setTargets,
+  sponsors,
+  attempted,
+  error,
+}: {
+  targets: Target[];
+  setTargets: React.Dispatch<React.SetStateAction<Target[]>>;
+  sponsors: ReturnType<typeof useSponsors>["sponsors"];
+  attempted: boolean;
+  error: string;
+}) {
+  const [mode, setMode] = useState<0 | 1>(0);
+  const [q, setQ] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
+  const [form, setForm] = useState({ company: "", email: "", contactName: "" });
+  const [formTried, setFormTried] = useState(false);
+  const added = useMemo(() => new Set(targets.map((t) => t.sponsorId).filter(Boolean)), [targets]);
+
+  const matches = useMemo(() => {
+    const n = q.trim().toLowerCase();
+    return sponsors
+      .filter((s) => !added.has(s.id))
+      .filter((s) => !n || s.name.toLowerCase().includes(n) || (s.email ?? "").toLowerCase().includes(n))
+      .slice(0, 40);
+  }, [sponsors, q, added]);
+
+  function addPicked() {
+    const rows = sponsors
+      .filter((s) => picked.includes(s.id) && s.email)
+      .map<Target>((s) => ({
+        id: uid(),
+        company: s.name,
+        email: s.email,
+        contactName: "",
+        context: s.description,
+        sponsorId: s.id,
+      }));
+    setTargets((prev) => [...prev, ...rows]);
+    setPicked([]);
+    toast.success(`${rows.length} ${rows.length === 1 ? "recipient" : "recipients"} added`);
+  }
+
+  const formErrors = {
+    company: form.company.trim() ? "" : "Enter the company name.",
+    email: EMAIL_RE.test(form.email.trim()) ? "" : "Enter a valid email, like name@company.com.",
+  };
+
+  function addManual(e: React.FormEvent) {
+    e.preventDefault();
+    setFormTried(true);
+    if (formErrors.company || formErrors.email) return;
+    setTargets((prev) => [
+      ...prev,
+      { id: uid(), company: form.company.trim(), email: form.email.trim(), contactName: form.contactName.trim(), context: "" },
+    ]);
+    setForm({ company: "", email: "", contactName: "" });
+    setFormTried(false);
+  }
+
+  return (
+    <section className="space-y-4 rounded-2xl border border-line bg-raised p-5 sm:p-6">
+      <div>
+        <h2 className="font-display text-lg font-bold">Recipients</h2>
+        <p className="text-sm text-muted">Pick sponsors the team already logged, or add a company by hand.</p>
+      </div>
+
+      <div role="tablist" aria-label="How to add recipients" className="relative grid grid-cols-2 rounded-xl border border-line bg-bg p-1">
+        {MODES.map((m, i) => (
+          <button
+            key={m}
+            type="button"
+            role="tab"
+            aria-selected={mode === i}
+            onClick={() => setMode(i as 0 | 1)}
+            className={cn(
+              "relative z-10 h-10 rounded-lg text-sm font-semibold transition-colors duration-150",
+              mode === i ? "text-[#071a33]" : "text-muted hover:text-fg",
+            )}
+          >
+            {mode === i && (
+              <motion.span
+                layoutId="recipient-pill"
+                className="absolute inset-0 -z-10 rounded-lg bg-sky"
+                transition={{ duration: 0.25, ease: EASE }}
+              />
+            )}
+            {m}
+          </button>
+        ))}
+      </div>
+
+      {mode === 0 ? (
+        <div className="rounded-xl border border-line bg-bg p-4">
+          <Field label="Search sponsors">
+            <span className="relative block">
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                className={cn(FIELD, "h-11 bg-raised pl-10")}
+                placeholder="Company or email"
+              />
+            </span>
+          </Field>
+          <ul className="mt-3 max-h-56 divide-y divide-line overflow-y-auto rounded-xl border border-line bg-raised">
+            {matches.length === 0 && <li className="px-4 py-3 text-sm text-muted">No logged sponsors match.</li>}
+            {matches.map((s) => {
+              const noEmail = !s.email;
+              return (
+                <li key={s.id}>
+                  <label
+                    className={cn(
+                      "flex min-h-11 items-center gap-3 px-4 py-2",
+                      noEmail ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-fg/5",
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      disabled={noEmail}
+                      checked={picked.includes(s.id)}
+                      onChange={(e) => setPicked((p) => (e.target.checked ? [...p, s.id] : p.filter((x) => x !== s.id)))}
+                      className="size-4 accent-[var(--sky)]"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{s.name}</span>
+                      <span className="block truncate text-xs text-muted">{noEmail ? "No email saved" : s.email}</span>
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+          <button
+            type="button"
+            disabled={picked.length === 0}
+            onClick={addPicked}
+            className="mt-3 inline-flex h-10 items-center gap-2 rounded-xl bg-sky px-4 text-sm font-semibold text-[#071a33] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Plus className="size-4" /> Add {picked.length || ""} selected {picked.length === 1 ? "sponsor" : "sponsors"}
+          </button>
+        </div>
+      ) : (
+        <form onSubmit={addManual} noValidate className="rounded-xl border border-line bg-bg p-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field label="Company" error={formTried ? formErrors.company : ""}>
+              <input dir="auto" value={form.company} onChange={(e) => setForm((f) => ({ ...f, company: e.target.value }))} className={cn(FIELD, "h-11 bg-raised")} />
+            </Field>
+            <Field label="Email" error={formTried ? formErrors.email : ""}>
+              <input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} className={cn(FIELD, "h-11 bg-raised")} />
+            </Field>
+            <Field label="Contact name (optional)">
+              <input dir="auto" value={form.contactName} onChange={(e) => setForm((f) => ({ ...f, contactName: e.target.value }))} className={cn(FIELD, "h-11 bg-raised")} />
+            </Field>
+          </div>
+          <button type="submit" className="mt-3 inline-flex h-10 items-center gap-2 rounded-xl bg-sky px-4 text-sm font-semibold text-[#071a33]">
+            <Plus className="size-4" /> Add
+          </button>
+        </form>
+      )}
+
+      <div>
+        <h3 className="mb-2 text-sm font-semibold">Chosen recipients ({targets.length})</h3>
+        {targets.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-line p-4 text-sm text-muted">Nobody yet. Pick a sponsor or add one by hand.</p>
+        ) : (
+          <ul className="space-y-2">
+            <AnimatePresence initial={false}>
+              {targets.map((t) => (
+                <motion.li
+                  key={t.id}
+                  layout
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2, ease: EASE }}
+                  className="flex items-center gap-3 rounded-xl border border-line bg-bg px-4 py-2.5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{t.company}</p>
+                    <p className="truncate text-xs text-muted">
+                      {t.email}
+                      {t.contactName ? ` · ${t.contactName}` : ""}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTargets((p) => p.filter((x) => x.id !== t.id))}
+                    className="inline-flex h-10 items-center gap-1.5 rounded-lg px-2 text-sm text-muted hover:text-coral"
+                  >
+                    <Trash2 className="size-4" />
+                    <span className="sr-only">Remove {t.company}</span>
+                  </button>
+                </motion.li>
+              ))}
+            </AnimatePresence>
+          </ul>
+        )}
+        {attempted && error && (
+          <p role="alert" className="mt-2 text-xs text-coral">
+            {error}
+          </p>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -814,7 +897,80 @@ function gmailUrl(email: string, subject: string, body: string) {
   return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
+type SendState = { status: "ready" | "sending" | "sent" | "failed"; error?: string };
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 function SendStep({ targets, drafts, onBack }: { targets: Target[]; drafts: Record<string, Draft>; onBack: () => void }) {
+  const reduce = useReducedMotion();
+  const [states, setStates] = useState<Record<string, SendState>>({});
+  const [busy, setBusy] = useState(false);
+  const [offMsg, setOffMsg] = useState("");
+  const alive = useRef(true);
+  const celebrated = useRef(false);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
+  const stateOf = (id: string): SendState => states[id] ?? { status: "ready" };
+  const setState = (id: string, s: SendState) => setStates((p) => ({ ...p, [id]: s }));
+  const sentCount = targets.filter((t) => stateOf(t.id).status === "sent").length;
+  const unsent = targets.filter((t) => stateOf(t.id).status !== "sent");
+  const allSent = targets.length > 0 && sentCount === targets.length;
+
+  useEffect(() => {
+    if (!allSent || celebrated.current) return;
+    celebrated.current = true;
+    if (reduce) return;
+    import("canvas-confetti").then(({ default: confetti }) => {
+      confetti({ particleCount: 90, spread: 70, origin: { y: 0.3 }, colors: ["#f5c542", "#4cc9f0", "#5eead4"] });
+    });
+  }, [allSent, reduce]);
+
+  async function sendOne(t: Target): Promise<"ok" | "fail" | "off"> {
+    const d = drafts[t.id];
+    setState(t.id, { status: "sending" });
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error("Sign in again to send.");
+      const res = await fetch("/api/emails/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ to: t.email, subject: d.subject, body: d.body, company: t.company, sponsorId: t.sponsorId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (res.status === 503) {
+        if (alive.current) {
+          setOffMsg(data.error || "Sending isn't set up yet.");
+          setState(t.id, { status: "ready" });
+        }
+        return "off";
+      }
+      if (!res.ok || data.ok === false) throw new Error(data.error || `The email didn't send (error ${res.status}).`);
+      if (alive.current) setState(t.id, { status: "sent" });
+      return "ok";
+    } catch (e) {
+      if (alive.current) setState(t.id, { status: "failed", error: e instanceof Error ? e.message : "Something went wrong." });
+      return "fail";
+    }
+  }
+
+  async function run(list: Target[]) {
+    if (busy) return;
+    setBusy(true);
+    setOffMsg("");
+    for (let i = 0; i < list.length; i++) {
+      if (!alive.current) break;
+      const r = await sendOne(list[i]);
+      if (r === "off") break;
+      if (i < list.length - 1) await sleep(1200);
+    }
+    if (alive.current) setBusy(false);
+  }
+
   async function copy(t: Target) {
     const d = drafts[t.id];
     try {
@@ -829,11 +985,47 @@ function SendStep({ targets, drafts, onBack }: { targets: Target[]; drafts: Reco
     <div className="space-y-5">
       <div className="flex gap-3 rounded-2xl border border-sky/30 bg-sky/10 p-4 text-sm">
         <Mail className="mt-0.5 size-5 shrink-0 text-sky" />
-        <p>
-          Sending through Gmail isn&apos;t connected yet. Copy each email or open it in Gmail to send it yourself.
-          <span className="text-muted"> One-click sending from the FR Head&apos;s Gmail is the next step.</span>
-        </p>
+        <p>Emails go out from the FR team&apos;s Gmail with your name and email in the signature; replies come back to you.</p>
       </div>
+
+      <AnimatePresence>
+        {offMsg && (
+          <motion.div
+            role="alert"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25, ease: EASE }}
+            className="flex gap-3 rounded-2xl border border-amber/40 bg-amber/10 p-4 text-sm"
+          >
+            <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber" />
+            <p>
+              {offMsg}
+              <span className="text-muted"> Use Copy or Open in Gmail on each email for now.</span>
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {allSent && (
+          <motion.div
+            role="status"
+            initial={{ opacity: 0, scale: reduce ? 1 : 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3, ease: EASE }}
+            className="flex items-center gap-3 rounded-2xl border border-mint/40 bg-mint/10 p-4"
+          >
+            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-mint text-[#071a33]">
+              <Check className="size-5" />
+            </span>
+            <p className="font-semibold">
+              Sent {sentCount} {sentCount === 1 ? "email" : "emails"}. <span className="font-normal text-muted">Replies go to your inbox.</span>
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {targets.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-line p-8 text-center">
@@ -844,46 +1036,93 @@ function SendStep({ targets, drafts, onBack }: { targets: Target[]; drafts: Reco
           </button>
         </div>
       ) : (
-        <ul className="space-y-4">
-          {targets.map((t, i) => {
-            const d = drafts[t.id];
-            return (
-              <motion.li
-                key={t.id}
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, ease: EASE, delay: Math.min(i, 8) * 0.06 }}
-                className="rounded-2xl border border-line bg-raised p-5 sm:p-6"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="truncate font-display text-lg font-bold">{t.company}</h3>
-                    <p className="truncate text-sm text-muted">{t.email}</p>
+        <>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted">
+              {sentCount} of {targets.length} sent
+            </p>
+            <button
+              type="button"
+              onClick={() => run(unsent)}
+              disabled={busy || unsent.length === 0}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-gold px-5 font-semibold text-[#071a33] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+              {busy ? "Sending…" : `Send all approved (${unsent.length})`}
+            </button>
+          </div>
+
+          <ul className="space-y-4">
+            {targets.map((t, i) => {
+              const d = drafts[t.id];
+              const st = stateOf(t.id);
+              return (
+                <motion.li
+                  key={t.id}
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, ease: EASE, delay: Math.min(i, 8) * 0.06 }}
+                  className={cn(
+                    "rounded-2xl border bg-raised p-5 transition-colors duration-200 sm:p-6",
+                    st.status === "sent" ? "border-mint/40" : st.status === "failed" ? "border-coral/40" : "border-line",
+                  )}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="truncate font-display text-lg font-bold">{t.company}</h3>
+                      <p className="truncate text-sm text-muted">{t.email}</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {st.status === "sending" && (
+                        <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-sky">
+                          <Loader2 className="size-4 animate-spin" /> Sending
+                        </span>
+                      )}
+                      {st.status === "sent" && (
+                        <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-mint">
+                          <Check className="size-4" /> Sent
+                        </span>
+                      )}
+                      {(st.status === "ready" || st.status === "failed") && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => run([t])}
+                          className="inline-flex h-10 items-center gap-2 rounded-xl bg-gold px-4 text-sm font-semibold text-[#071a33] disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {st.status === "failed" ? <RefreshCw className="size-4" /> : <Send className="size-4" />}
+                          {st.status === "failed" ? "Retry" : "Send"}
+                        </button>
+                      )}
+                      <button type="button" onClick={() => copy(t)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-line px-3 text-sm font-semibold hover:bg-fg/5">
+                        <Copy className="size-4" /> Copy
+                      </button>
+                      <a
+                        href={gmailUrl(t.email, d.subject, d.body)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex h-10 items-center gap-2 rounded-xl border border-line px-3 text-sm font-semibold hover:bg-fg/5"
+                      >
+                        <ExternalLink className="size-4" /> Open in Gmail
+                      </a>
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={() => copy(t)} className="inline-flex h-10 items-center gap-2 rounded-xl border border-line px-4 text-sm font-semibold hover:bg-fg/5">
-                      <Copy className="size-4" /> Copy email
-                    </button>
-                    <a
-                      href={gmailUrl(t.email, d.subject, d.body)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex h-10 items-center gap-2 rounded-xl bg-gold px-4 text-sm font-semibold text-[#071a33]"
-                    >
-                      <ExternalLink className="size-4" /> Open in Gmail
-                    </a>
-                  </div>
-                </div>
-                <p className="mt-4 text-sm font-semibold" dir="auto">
-                  {d.subject}
-                </p>
-                <p className="mt-2 line-clamp-4 whitespace-pre-line text-sm text-muted" dir="auto">
-                  {d.body}
-                </p>
-              </motion.li>
-            );
-          })}
-        </ul>
+                  {st.status === "failed" && (
+                    <p role="alert" className="mt-3 text-sm text-coral">
+                      {st.error}
+                    </p>
+                  )}
+                  <p className="mt-4 text-sm font-semibold" dir="auto">
+                    {d.subject}
+                  </p>
+                  <p className="mt-2 line-clamp-4 whitespace-pre-line text-sm text-muted" dir="auto">
+                    {d.body}
+                  </p>
+                </motion.li>
+              );
+            })}
+          </ul>
+        </>
       )}
 
       {targets.length > 0 && (

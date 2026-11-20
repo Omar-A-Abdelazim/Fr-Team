@@ -11,14 +11,17 @@ import { approveSponsor, rejectSponsor } from "@/lib/firebase/data";
 
 export function ApprovalQueue({ sponsors, limit = 5 }: { sponsors: Sponsor[]; limit?: number }) {
   const [handled, setHandled] = useState<string[]>([]);
-  const pending = sponsors.filter((s) => !s.approved && !s.reviewed && !handled.includes(s.id));
+  // Everything new lands here once: auto-approved entries (points already given) and possible duplicates (no points yet).
+  const pending = sponsors
+    .filter((s) => !s.reviewed && !handled.includes(s.id))
+    .sort((a, b) => Number(a.approved) - Number(b.approved));
   const visible = pending.slice(0, limit);
 
   const approve = async (s: Sponsor) => {
     setHandled((h) => [...h, s.id]);
     try {
       const pts = await approveSponsor(s.id);
-      toast.success(pts ? `+${pts} points to ${s.ownerName}` : `${s.name} was already approved`);
+      toast.success(pts ? `+${pts} points to ${s.ownerName}` : `${s.name} marked as checked`);
     } catch {
       setHandled((h) => h.filter((id) => id !== s.id));
       toast.error(`Couldn't approve ${s.name}. Try again.`);
@@ -28,7 +31,7 @@ export function ApprovalQueue({ sponsors, limit = 5 }: { sponsors: Sponsor[]; li
     setHandled((h) => [...h, s.id]);
     try {
       await rejectSponsor(s.id);
-      toast(`${s.name} marked as not counted`);
+      toast(`${s.name} no longer counts for points`);
     } catch {
       setHandled((h) => h.filter((id) => id !== s.id));
       toast.error(`Couldn't update ${s.name}. Try again.`);
@@ -37,8 +40,10 @@ export function ApprovalQueue({ sponsors, limit = 5 }: { sponsors: Sponsor[]; li
 
   return (
     <section className="rounded-3xl border border-line bg-raised p-6 sm:p-8">
-      <h2 className="font-display text-xl font-bold">Approval queue</h2>
-      <p className="mt-1 text-sm text-muted">{pending.length} waiting for your review</p>
+      <h2 className="font-display text-xl font-bold">New entries</h2>
+      <p className="mt-1 text-sm text-muted">
+        New sponsors get points automatically. Possible duplicates wait for you. Checking these is optional.
+      </p>
 
       <ul className="mt-6 flex flex-col">
         <AnimatePresence initial={false} mode="popLayout">
@@ -64,6 +69,11 @@ export function ApprovalQueue({ sponsors, limit = 5 }: { sponsors: Sponsor[]; li
                 <div className="mt-1 flex items-center gap-2 text-xs text-muted">
                   <span>{s.ownerName}</span>
                   <StatusBadge {...STATUS_META[s.status]} />
+                  {s.approved ? (
+                    <span className="font-semibold text-mint">Auto-approved +{s.points}</span>
+                  ) : (
+                    <span className="font-semibold text-amber">Possible duplicate, no points yet</span>
+                  )}
                 </div>
               </div>
               <div className="flex gap-2">
@@ -72,8 +82,8 @@ export function ApprovalQueue({ sponsors, limit = 5 }: { sponsors: Sponsor[]; li
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
                   onClick={() => approve(s)}
-                  aria-label={`Approve ${s.name}`}
-                  title="Approve"
+                  aria-label={s.approved ? `Mark ${s.name} as checked` : `Approve ${s.name}`}
+                  title={s.approved ? "Looks good" : "Approve and give points"}
                   className="flex size-9 items-center justify-center rounded-full bg-mint/20 text-mint transition-colors hover:bg-mint hover:text-[#071a33]"
                 >
                   <Check className="size-4" />
@@ -83,8 +93,8 @@ export function ApprovalQueue({ sponsors, limit = 5 }: { sponsors: Sponsor[]; li
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
                   onClick={() => reject(s)}
-                  aria-label={`Reject ${s.name}`}
-                  title="Reject"
+                  aria-label={`Don't count ${s.name}`}
+                  title="Don't count for points"
                   className="flex size-9 items-center justify-center rounded-full bg-coral/20 text-coral transition-colors hover:bg-coral hover:text-[#071a33]"
                 >
                   <X className="size-4" />
@@ -97,7 +107,7 @@ export function ApprovalQueue({ sponsors, limit = 5 }: { sponsors: Sponsor[]; li
 
       {pending.length === 0 && (
         <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="mt-8 flex items-center gap-3 text-sm text-muted">
-          <PartyPopper className="size-5 text-gold" /> Queue is clear. Nice work.
+          <PartyPopper className="size-5 text-gold" /> Nothing new to check.
         </motion.div>
       )}
     </section>

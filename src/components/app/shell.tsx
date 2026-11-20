@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 const MEMBER_NAV = [
   { href: "/app", label: "My sponsors", icon: Building2 },
   { href: "/app/leaderboard", label: "Leaderboard", icon: Trophy },
+  { href: "/app/emails", label: "Email composer", icon: Mail },
 ];
 
 const ADMIN_NAV = [
@@ -74,13 +75,13 @@ export function Shell({ children, variant }: { children: React.ReactNode; varian
         </nav>
 
         <div className="flex items-center gap-2 lg:mt-auto lg:justify-between lg:rounded-2xl lg:border lg:border-line lg:p-3">
-          <div className="hidden items-center gap-2.5 lg:flex">
+          <div className="hidden min-w-0 flex-1 items-center gap-2.5 lg:flex">
             {profile?.photoURL ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={profile.photoURL} alt="" className="size-9 rounded-full" referrerPolicy="no-referrer" />
+              <img src={profile.photoURL} alt="" className="size-9 shrink-0 rounded-full" referrerPolicy="no-referrer" />
             ) : (
               <span
-                className="grid size-9 place-items-center rounded-full font-display font-bold text-[#071a33]"
+                className="grid size-9 shrink-0 place-items-center rounded-full font-display font-bold text-[#071a33]"
                 style={{ background: profile?.color ?? "var(--sky)" }}
               >
                 {name[0]?.toUpperCase()}
@@ -88,10 +89,10 @@ export function Shell({ children, variant }: { children: React.ReactNode; varian
             )}
             <div className="min-w-0 text-sm leading-tight">
               <p className="truncate font-semibold">{name}</p>
-              <p className="text-muted">{isAdmin ? "Admin" : "FR member"}</p>
+              <p className="truncate text-muted">{isAdmin ? "Admin" : "FR member"}</p>
             </div>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center lg:-mr-1">
             <ThemeToggle />
             <button
               type="button"
@@ -101,7 +102,7 @@ export function Shell({ children, variant }: { children: React.ReactNode; varian
               }}
               aria-label="Sign out"
               title="Sign out"
-              className="grid size-10 place-items-center rounded-full text-muted hover:bg-fg/5 hover:text-fg"
+              className="grid size-9 place-items-center rounded-full text-muted hover:bg-fg/5 hover:text-fg"
             >
               <LogOut className="size-4" />
             </button>

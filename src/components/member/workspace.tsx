@@ -9,7 +9,7 @@ import { StatusBadge } from "@/components/app/shell";
 import { MyHeader } from "@/components/member/my-header";
 import { AddSponsor } from "@/components/member/add-sponsor";
 import { RefusalDialog } from "@/components/member/refusal-dialog";
-import { STATUS_META, STATUSES, TYPE_COLOR } from "@/lib/constants";
+import { POINTS, STATUS_META, STATUSES, TYPE_COLOR } from "@/lib/constants";
 import { useAuth } from "@/lib/firebase/auth-context";
 import { createSponsor, setStatus, useSponsors } from "@/lib/firebase/data";
 import type { Sponsor, SponsorStatus } from "@/types";
@@ -64,7 +64,7 @@ export function Workspace() {
     }
     if (status === "accepted" || status === "closed") {
       confetti({ particleCount: 140, spread: 80, origin: { y: 0.6 }, colors: ["#f5b83d", "#4cc3f2", "#3dd6a3", "#ffffff"] });
-      toast.success(`${s.name} accepted`, { description: "Waiting for the FR Head to approve your points." });
+      toast.success(`${s.name} accepted`, { description: "Deal won. Nice work!" });
     }
   }
 
@@ -257,12 +257,16 @@ export function Workspace() {
         open={adding}
         onClose={() => setAdding(false)}
         pool={sponsors}
-        onSave={async (d) => {
+        onSave={async (d, possibleDuplicate) => {
           try {
-            await createSponsor(d, { id: me.id, name: me.name });
+            await createSponsor(d, { id: me.id, name: me.name }, possibleDuplicate);
             setScope("mine");
             setFilter("all");
-            toast.success(`${d.name} logged`, { description: "It shows up for the whole team now." });
+            toast.success(possibleDuplicate ? `${d.name} logged` : `${d.name} logged, +${POINTS[d.partnerType]} points`, {
+              description: possibleDuplicate
+                ? "It looked like another entry, so an admin will check it before points are added."
+                : "It shows up for the whole team now.",
+            });
             return true;
           } catch (e) {
             toast.error(e instanceof Error ? e.message : "Couldn't save. Try again.");

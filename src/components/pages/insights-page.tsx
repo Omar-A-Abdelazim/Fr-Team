@@ -1,11 +1,14 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
+import { AlertTriangle, ChevronDown } from "lucide-react";
 import { useMemo, useState } from "react";
 import { RefusalPanel } from "@/components/admin/refusals";
 import { computeRefusals } from "@/components/admin/stats";
 import { REFUSAL_LABELS, TYPE_COLOR } from "@/lib/constants";
+import { auth } from "@/lib/firebase/client";
 import { useSponsors } from "@/lib/firebase/data";
+import { SummaryCards, SummaryLoading, type RefusalSummary } from "./refusal-summary";
 import type { PartnerType } from "@/types";
 
 function Bars({ title, rows }: { title: string; rows: { label: string; count: number; color: string }[] }) {
@@ -40,6 +43,10 @@ function Bars({ title, rows }: { title: string; rows: { label: string; count: nu
 export function InsightsPage() {
   const { sponsors, loading } = useSponsors();
   const [who, setWho] = useState("all");
+  const [help, setHelp] = useState(false);
+  const [summary, setSummary] = useState<RefusalSummary | null>(null);
+  const [summarizing, setSummarizing] = useState(false);
+  const [summaryError, setSummaryError] = useState("");
   const refused = useMemo(() => sponsors.filter((s) => s.status === "refused" && s.refusal), [sponsors]);
   const data = useMemo(() => computeRefusals(sponsors), [sponsors]);
 
@@ -56,6 +63,43 @@ export function InsightsPage() {
   const owners = [...new Set(refused.map((s) => s.ownerName))];
   const list = refused.filter((s) => who === "all" || s.ownerName === who);
 
+  async function summarize() {
+    if (summarizing) return;
+    setSummarizing(true);
+    setSummaryError("");
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error("Sign in again to generate the summary.");
+      const res = await fetch("/api/insights/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          refusals: refused.map((s) => ({
+            company: s.name,
+            partnerType: s.partnerType,
+            ownerName: s.ownerName,
+            category: s.refusal!.category,
+            details: s.refusal!.details,
+            selfAssessment: s.refusal!.memberSelfAssessment,
+          })),
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as Partial<RefusalSummary> & { error?: string };
+      if (!res.ok) throw new Error(data.error || `The summary didn't come back (error ${res.status}).`);
+      setSummary({
+        summary: data.summary ?? "",
+        topReasons: data.topReasons ?? [],
+        rootCauses: data.rootCauses ?? [],
+        coaching: data.coaching ?? [],
+        actions: data.actions ?? [],
+      });
+    } catch (e) {
+      setSummaryError(e instanceof Error ? e.message : "Something went wrong.");
+    } finally {
+      setSummarizing(false);
+    }
+  }
+
   if (loading) return <div className="mx-auto h-96 max-w-6xl animate-pulse rounded-3xl bg-raised" />;
 
   return (
@@ -65,8 +109,71 @@ export function InsightsPage() {
         <p className="mt-1 text-muted">Why sponsors said no, and what the team thinks went wrong.</p>
       </header>
 
+      <div className="rounded-2xl border border-line bg-raised">
+        <button
+          type="button"
+          onClick={() => setHelp((o) => !o)}
+          aria-expanded={help}
+          className="flex min-h-11 w-full items-center justify-between px-4 text-sm font-semibold"
+        >
+          How to use this page
+          <motion.span animate={{ rotate: help ? 180 : 0 }} transition={{ duration: 0.2 }}>
+            <ChevronDown className="size-4" />
+          </motion.span>
+        </button>
+        <AnimatePresence initial={false}>
+          {help && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+              className="overflow-hidden"
+            >
+              <ul className="list-disc space-y-2 border-t border-line py-3 pl-9 pr-4 text-sm text-muted">
+                <li>Members log why a sponsor said no when they mark it Refused.</li>
+                <li>This page groups those reasons by type and member so you can see where the pitch breaks.</li>
+                <li>Use the AI summary before each FR meeting to decide what to change in the proposal and who needs coaching.</li>
+              </ul>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      <AnimatePresence mode="wait" initial={false}>
+        {summarizing ? (
+          <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+            <SummaryLoading />
+          </motion.div>
+        ) : summaryError ? (
+          <motion.div
+            key="error"
+            role="alert"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+            className="flex gap-3 rounded-2xl border border-coral/40 bg-coral/10 p-4 text-sm"
+          >
+            <AlertTriangle className="mt-0.5 size-5 shrink-0 text-coral" />
+            <p>
+              {summaryError} <span className="text-muted">Try Generate AI summary again.</span>
+            </p>
+          </motion.div>
+        ) : summary ? (
+          <motion.div key="summary" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+            <SummaryCards data={summary} />
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
       <div className="grid gap-6 lg:grid-cols-2">
-        <RefusalPanel data={data} />
+        <RefusalPanel
+          data={data}
+          onSummarize={summarize}
+          summarizing={summarizing}
+          summaryHint={refused.length < 3 ? "Needs at least 3 refusals to find patterns" : undefined}
+        />
         <div className="grid gap-6">
           <Bars title="Refusals by partner type" rows={byType} />
           <Bars title="Refusals by member" rows={byMember} />

@@ -28,8 +28,11 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if signedIn()
         && request.resource.data.ownerId == request.auth.uid
-        && request.resource.data.approved == false
-        && request.resource.data.points == 0
+        // auto-approval: points must match the partner type exactly, or be 0 when not approved
+        && ((request.resource.data.approved == false && request.resource.data.points == 0)
+            || (request.resource.data.approved == true
+                && request.resource.data.points == {"Fund": 5, "Catering": 3, "Host": 2, "Courses": 1, "Technical": 1, "Logistics": 2}[request.resource.data.partnerType]))
+        && request.resource.data.reviewed == false
         && request.resource.data.name is string
         && request.resource.data.name.size() > 1;
       // owners edit their own entries but never approval or points
@@ -45,6 +48,13 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
       allow update: if false;
       allow delete: if isAdmin();
+    }
+
+    // One entry per email sent from the site. Used for the daily limit and history.
+    match /emailLogs/{id} {
+      allow read: if signedIn() && (resource.data.senderId == request.auth.uid || isAdmin());
+      allow create: if signedIn() && request.resource.data.senderId == request.auth.uid;
+      allow update, delete: if false;
     }
 
     match /settings/{doc} {
