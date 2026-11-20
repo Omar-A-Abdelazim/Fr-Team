@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { setEmailRefusal, setEmailReply, type EmailLog, type EmailReply } from "@/lib/firebase/data";
 import { REFUSAL_LABELS } from "@/lib/constants";
-import type { RefusalCategory, Sponsor } from "@/types";
+import type { Refusal, Sponsor } from "@/types";
 
 export const REPLY_LABEL: Record<EmailReply, string> = {
   waiting: "Waiting",
@@ -18,7 +18,7 @@ export function useEmailActions(ownerId: string | undefined, sponsors: Sponsor[]
   const [busy, setBusy] = useState(false);
   const sponsorOf = useCallback((e: EmailLog) => sponsors.find((s) => s.id === e.sponsorId) ?? null, [sponsors]);
 
-  /** Any reply except "refused", which needs a reason first (see refuse). */
+  /** Any reply except "refused", which goes through the refusal dialog (see refuse). */
   const change = useCallback(
     async (email: EmailLog, reply: EmailReply) => {
       if (!ownerId || reply === "refused" || reply === email.reply || busy) return;
@@ -42,15 +42,15 @@ export function useEmailActions(ownerId: string | undefined, sponsors: Sponsor[]
   );
 
   const refuse = useCallback(
-    async (email: EmailLog, category: RefusalCategory) => {
+    async (email: EmailLog, r: Refusal) => {
       if (!ownerId || busy) return false;
       setBusy(true);
       try {
-        await setEmailRefusal(email, category, sponsorOf(email), ownerId);
-        toast.success(`Refusal reason saved for ${email.company}`, { description: `Reason: ${REFUSAL_LABELS[category]}` });
+        await setEmailRefusal(email, r.category, sponsorOf(email), ownerId, r.details, r.memberSelfAssessment);
+        toast.success(`Refusal saved for ${email.company}`, { description: `Reason: ${REFUSAL_LABELS[r.category]}` });
         return true;
       } catch (e) {
-        toast.error(`Couldn't save the reason for ${email.company}.`, { description: why(e) });
+        toast.error(`Couldn't save the refusal for ${email.company}.`, { description: why(e) });
         return false;
       } finally {
         setBusy(false);

@@ -185,7 +185,7 @@ export function useMyEmails(uid: string | undefined) {
 }
 
 const REPLY_TO_STATUS: Record<EmailReply, SponsorStatus | null> = {
-  waiting: null,
+  waiting: "contacted",
   replied: "replied",
   accepted: "accepted",
   refused: null, // refusals go through the refusal form so the reason is captured
@@ -258,4 +258,32 @@ export async function resetAllData(onProgress?: (done: number, total: number) =>
     onProgress?.(done, targets.length);
   }
   return targets.length;
+}
+
+const STATUS_TO_REPLY: Partial<Record<SponsorStatus, EmailReply>> = {
+  not_contacted: "waiting",
+  contacted: "waiting",
+  no_reply: "waiting",
+  replied: "replied",
+  follow_up: "replied",
+  accepted: "accepted",
+  closed: "accepted",
+  refused: "refused",
+};
+
+/**
+ * One source of truth: when an email is linked to a sponsor, its reply and refusal reason come
+ * from the sponsor (the same data My sponsors and Refusal insights use). Unlinked emails keep their own.
+ */
+export function linkEmails(emails: EmailLog[], sponsors: Sponsor[]): EmailLog[] {
+  const byId = new Map(sponsors.map((s) => [s.id, s]));
+  return emails.map((e) => {
+    const s = e.sponsorId ? byId.get(e.sponsorId) : undefined;
+    if (!s) return e;
+    return {
+      ...e,
+      reply: STATUS_TO_REPLY[s.status] ?? e.reply,
+      refusalCategory: s.status === "refused" ? (s.refusal?.category ?? "") : "",
+    };
+  });
 }

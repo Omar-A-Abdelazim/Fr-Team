@@ -10,15 +10,16 @@ import { REPLY_META } from "@/components/sent/meta";
 import { EmailsTable } from "@/components/tables/emails-table";
 import { REPLY_LABEL, useEmailActions } from "@/components/tables/use-email-actions";
 import { useAuth } from "@/lib/firebase/auth-context";
-import { useMyEmails, useSponsors, type EmailReply } from "@/lib/firebase/data";
+import { useMyEmails, useSponsors, linkEmails, type EmailReply } from "@/lib/firebase/data";
 
 const TILES: EmailReply[] = ["waiting", "replied", "accepted", "refused"];
 
 export function MyEmails() {
   const { profile } = useAuth();
   const uid = profile?.id;
-  const { emails, loading } = useMyEmails(uid);
+  const { emails: rawEmails, loading } = useMyEmails(uid);
   const { sponsors } = useSponsors();
+  const emails = useMemo(() => linkEmails(rawEmails, sponsors), [rawEmails, sponsors]);
   const [openId, setOpenId] = useState<string | null>(null);
   const { busy, change, refuse } = useEmailActions(uid, sponsors);
 
@@ -64,7 +65,7 @@ export function MyEmails() {
         suspended={false}
         onClose={() => setOpenId(null)}
         onChange={change}
-        onRefuse={(e, c) => void refuse(e, c)}
+        onRefuse={(e, r) => void refuse(e, r)}
       />
     </div>
   );

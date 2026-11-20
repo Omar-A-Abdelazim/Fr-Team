@@ -276,6 +276,8 @@ export function Workspace() {
       />
 
       <RefusalDialog
+        key={refusing?.id ?? "none"}
+        initial={refusing?.refusal ?? null}
         company={refusing?.name ?? null}
         onCancel={() => setRefusing(null)}
         onSave={async (r) => {

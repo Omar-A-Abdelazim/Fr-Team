@@ -14,7 +14,7 @@ import { EmailPanel } from "@/components/sent/email-panel";
 import { formatSent } from "@/components/sent/meta";
 import { EmailsTable } from "@/components/tables/emails-table";
 import { REFUSAL_LABELS, STATUS_META, TYPE_COLOR } from "@/lib/constants";
-import { useMembers, useMyEmails, useSponsors, type EmailLog } from "@/lib/firebase/data";
+import { useMembers, useMyEmails, useSponsors, linkEmails, type EmailLog } from "@/lib/firebase/data";
 import type { Sponsor, SponsorStatus } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -63,7 +63,8 @@ export function MemberProfile() {
   const reduce = useReducedMotion();
   const members = useMembers();
   const { sponsors, loading } = useSponsors();
-  const { emails } = useMyEmails(uid);
+  const { emails: rawEmails } = useMyEmails(uid);
+  const emails = useMemo(() => linkEmails(rawEmails, sponsors), [rawEmails, sponsors]);
   const [tab, setTab] = useState<Tab>("sponsors");
   const [group, setGroup] = useState<Group>("all");
   const [openId, setOpenId] = useState<string | null>(null);

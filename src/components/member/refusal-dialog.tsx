@@ -10,14 +10,17 @@ export function RefusalDialog({
   company,
   onCancel,
   onSave,
+  initial,
 }: {
   company: string | null;
   onCancel: () => void;
   onSave: (r: Refusal) => void;
+  /** Prefills the form when editing an existing refusal. Pass a `key` that changes per sponsor. */
+  initial?: Refusal | null;
 }) {
-  const [category, setCategory] = useState<RefusalCategory | null>(null);
-  const [details, setDetails] = useState("");
-  const [self, setSelf] = useState("");
+  const [category, setCategory] = useState<RefusalCategory | null>(initial?.category ?? null);
+  const [details, setDetails] = useState(initial?.details ?? "");
+  const [self, setSelf] = useState(initial?.memberSelfAssessment ?? "");
   const valid = category && details.trim().length > 4 && self.trim().length >= 20;
 
   function reset() {

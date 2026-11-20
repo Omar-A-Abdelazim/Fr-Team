@@ -7,7 +7,8 @@ import { REPLY_META, formatSent } from "@/components/sent/meta";
 import { REPLY_LABEL, useEmailActions } from "@/components/tables/use-email-actions";
 import { REFUSAL_LABELS } from "@/lib/constants";
 import type { EmailLog, EmailReply } from "@/lib/firebase/data";
-import type { RefusalCategory, Sponsor } from "@/types";
+import { RefusalDialog } from "@/components/member/refusal-dialog";
+import type { Refusal, Sponsor } from "@/types";
 import { cn } from "@/lib/utils";
 
 type Filter = "all" | EmailReply;
@@ -71,8 +72,8 @@ export function EmailsTable({
   const { busy, change, refuse } = useEmailActions(ownerId, sponsors);
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
-  // rows where "Said no" was picked but no reason is saved yet
-  const [pending, setPending] = useState<Set<string>>(new Set());
+  // email whose refusal dialog is open
+  const [refusing, setRefusing] = useState<EmailLog | null>(null);
 
   const counts = useMemo(() => {
     const c: Record<EmailReply, number> = { waiting: 0, replied: 0, accepted: 0, refused: 0 };
@@ -89,26 +90,18 @@ export function EmailsTable({
     );
   }, [emails, filter, q]);
 
-  function setPend(id: string, on: boolean) {
-    setPending((p) => {
-      const n = new Set(p);
-      if (on) n.add(id);
-      else n.delete(id);
-      return n;
-    });
-  }
-
   function onReply(e: EmailLog, r: EmailReply) {
     if (r === "refused") {
-      if (e.reply !== "refused") setPend(e.id, true);
+      if (e.reply !== "refused") setRefusing(e);
       return;
     }
-    setPend(e.id, false);
     void change(e, r);
   }
 
-  async function onReason(e: EmailLog, c: RefusalCategory) {
-    if (await refuse(e, c)) setPend(e.id, false);
+  async function onSaveRefusal(r: Refusal) {
+    if (!refusing) return;
+    const e = refusing;
+    if (await refuse(e, r)) setRefusing(null);
   }
 
   return (
@@ -164,12 +157,10 @@ export function EmailsTable({
           </thead>
           <tbody>
             {rows.map((e, i) => {
-              const isPending = pending.has(e.id);
-              const shown: EmailReply = isPending ? "refused" : e.reply;
-              const showReason = shown === "refused";
+              const showReason = e.reply === "refused";
               const zebra = i % 2 === 1 ? "bg-fg/[0.03]" : "";
               return (
-                <tr key={e.id} className={cn("group transition-colors duration-300 hover:bg-sky/10", zebra, isPending && "bg-coral/15 hover:bg-coral/15")}>
+                <tr key={e.id} className={cn("group transition-colors duration-300 hover:bg-sky/10", zebra)}>
                   <th scope="row" className={cn(TD, "max-w-48 border-b border-line text-left font-semibold")}>
                     <span className="block truncate" dir="auto" title={e.company}>
                       {e.company}
@@ -188,37 +179,27 @@ export function EmailsTable({
                     {readOnly ? (
                       <Pill reply={e.reply} />
                     ) : (
-                      <ReplySelect value={shown} disabled={busy} label={`Reply status for ${e.company}`} onChange={(r) => onReply(e, r)} />
+                      <ReplySelect value={e.reply} disabled={busy} label={`Reply status for ${e.company}`} onChange={(r) => onReply(e, r)} />
                     )}
                   </td>
                   <td className={cn(TD, "border-b border-line")}>
                     {!showReason ? (
                       <span className="text-muted" aria-label="Not applicable">—</span>
-                    ) : readOnly ? (
-                      <span className="text-coral">{e.refusalCategory ? REFUSAL_LABELS[e.refusalCategory] : "No reason saved"}</span>
                     ) : (
-                      <motion.span initial={reduce ? false : { opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2, ease: EASE }} className="relative inline-flex">
-                        <select
-                          aria-label={`Refusal reason for ${e.company}`}
-                          value={isPending ? "" : (e.refusalCategory ?? "")}
-                          disabled={busy}
-                          onChange={(ev) => ev.target.value && void onReason(e, ev.target.value as RefusalCategory)}
-                          className={cn(
-                            "h-8 max-w-56 cursor-pointer appearance-none truncate rounded-lg border bg-bg py-0 pl-2.5 pr-7 text-xs font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky disabled:cursor-wait disabled:opacity-60",
-                            isPending ? "border-coral" : "border-line",
-                          )}
-                        >
-                          <option value="" disabled>
-                            Pick a reason...
-                          </option>
-                          {(Object.keys(REFUSAL_LABELS) as RefusalCategory[]).map((c) => (
-                            <option key={c} value={c}>
-                              {REFUSAL_LABELS[c]}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown aria-hidden className="pointer-events-none absolute right-2 top-1/2 size-3.5 -translate-y-1/2 text-muted" />
-                      </motion.span>
+                      <span className="inline-flex items-center gap-2">
+                        <span className="text-coral">{e.refusalCategory ? REFUSAL_LABELS[e.refusalCategory] : "No reason saved"}</span>
+                        {!readOnly && (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => setRefusing(e)}
+                            aria-label={`Edit refusal for ${e.company}`}
+                            className="text-xs font-semibold text-sky underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky disabled:opacity-60"
+                          >
+                            Edit
+                          </button>
+                        )}
+                      </span>
                     )}
                   </td>
                   <td className={cn(TD, "border-b border-line")}>
@@ -249,6 +230,13 @@ export function EmailsTable({
           </tbody>
         </table>
       </div>
+      <RefusalDialog
+        key={refusing?.id ?? "none"}
+        company={refusing?.company ?? null}
+        initial={refusing ? (sponsors.find((s) => s.id === refusing.sponsorId)?.refusal ?? null) : null}
+        onCancel={() => setRefusing(null)}
+        onSave={(r) => void onSaveRefusal(r)}
+      />
     </div>
   );
 }
