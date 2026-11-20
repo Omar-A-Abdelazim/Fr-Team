@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  where,
   arrayUnion,
   collection,
   doc,
@@ -142,4 +143,56 @@ export async function approveSponsor(id: string) {
 
 export async function rejectSponsor(id: string) {
   await updateDoc(doc(db, "sponsors", id), { reviewed: true, approved: false, points: 0 });
+}
+
+export type EmailReply = "waiting" | "replied" | "accepted" | "refused";
+
+export type EmailLog = {
+  id: string;
+  senderId: string;
+  senderName: string;
+  to: string;
+  company: string;
+  sponsorId: string;
+  subject: string;
+  body: string;
+  reply: EmailReply;
+  sentAt: string;
+};
+
+/** Emails the signed-in member sent from the site, newest first. */
+export function useMyEmails(uid: string | undefined) {
+  const [emails, setEmails] = useState<EmailLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!uid) return;
+    return onSnapshot(
+      query(collection(db, "emailLogs"), where("senderId", "==", uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => {
+          const x = d.data();
+          return { ...(x as EmailLog), id: d.id, reply: (x.reply as EmailReply) ?? "waiting", body: x.body ?? "", sentAt: iso(x.sentAt) };
+        });
+        list.sort((a, b) => b.sentAt.localeCompare(a.sentAt));
+        setEmails(list);
+        setLoading(false);
+      },
+      () => setLoading(false),
+    );
+  }, [uid]);
+  return { emails, loading };
+}
+
+const REPLY_TO_STATUS: Record<EmailReply, SponsorStatus | null> = {
+  waiting: null,
+  replied: "replied",
+  accepted: "accepted",
+  refused: null, // refusals go through the refusal form so the reason is captured
+};
+
+/** Updates an email's reply status, and the linked sponsor's status when the member owns it. */
+export async function setEmailReply(email: EmailLog, reply: EmailReply, sponsor?: Sponsor | null, by?: string) {
+  await updateDoc(doc(db, "emailLogs", email.id), { reply, replyAt: serverTimestamp() });
+  const next = REPLY_TO_STATUS[reply];
+  if (next && sponsor && by && sponsor.ownerId === by && sponsor.status !== next) await setStatus(sponsor.id, next, by);
 }

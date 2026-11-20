@@ -102,6 +102,8 @@ export async function POST(req: Request) {
           company: { stringValue: company },
           sponsorId: { stringValue: sponsorId },
           subject: { stringValue: subject },
+          body: { stringValue: text },
+          reply: { stringValue: "waiting" },
           day: { stringValue: day },
           sentAt: { timestampValue: new Date().toISOString() },
         },

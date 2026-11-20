@@ -19,7 +19,9 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { auth } from "@/lib/firebase/client";
-import { useSponsors } from "@/lib/firebase/data";
+import { setStatus, useSponsors } from "@/lib/firebase/data";
+import { useAuth } from "@/lib/firebase/auth-context";
+import { SentCelebration } from "@/components/fx/sent-celebration";
 import { cn } from "@/lib/utils";
 
 const EASE = [0.16, 1, 0.3, 1] as const;
@@ -280,7 +282,7 @@ export function EmailComposer() {
               onNext={() => go(2)}
             />
           )}
-          {step === 2 && <SendStep targets={approved} drafts={drafts} onBack={() => go(1)} />}
+          {step === 2 && <SendStep targets={approved} drafts={drafts} sponsors={sponsors} onBack={() => go(1)} />}
         </motion.div>
       </AnimatePresence>
     </div>
@@ -900,13 +902,22 @@ function gmailUrl(email: string, subject: string, body: string) {
 type SendState = { status: "ready" | "sending" | "sent" | "failed"; error?: string };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function SendStep({ targets, drafts, onBack }: { targets: Target[]; drafts: Record<string, Draft>; onBack: () => void }) {
-  const reduce = useReducedMotion();
+function SendStep({
+  targets,
+  drafts,
+  sponsors,
+  onBack,
+}: {
+  targets: Target[];
+  drafts: Record<string, Draft>;
+  sponsors: ReturnType<typeof useSponsors>["sponsors"];
+  onBack: () => void;
+}) {
+  const { profile } = useAuth();
   const [states, setStates] = useState<Record<string, SendState>>({});
   const [busy, setBusy] = useState(false);
   const [offMsg, setOffMsg] = useState("");
   const alive = useRef(true);
-  const celebrated = useRef(false);
 
   useEffect(() => {
     alive.current = true;
@@ -920,15 +931,6 @@ function SendStep({ targets, drafts, onBack }: { targets: Target[]; drafts: Reco
   const sentCount = targets.filter((t) => stateOf(t.id).status === "sent").length;
   const unsent = targets.filter((t) => stateOf(t.id).status !== "sent");
   const allSent = targets.length > 0 && sentCount === targets.length;
-
-  useEffect(() => {
-    if (!allSent || celebrated.current) return;
-    celebrated.current = true;
-    if (reduce) return;
-    import("canvas-confetti").then(({ default: confetti }) => {
-      confetti({ particleCount: 90, spread: 70, origin: { y: 0.3 }, colors: ["#f5c542", "#4cc9f0", "#5eead4"] });
-    });
-  }, [allSent, reduce]);
 
   async function sendOne(t: Target): Promise<"ok" | "fail" | "off"> {
     const d = drafts[t.id];
@@ -951,6 +953,12 @@ function SendStep({ targets, drafts, onBack }: { targets: Target[]; drafts: Reco
       }
       if (!res.ok || data.ok === false) throw new Error(data.error || `The email didn't send (error ${res.status}).`);
       if (alive.current) setState(t.id, { status: "sent" });
+      if (t.sponsorId && profile) {
+        const sp = sponsors.find((x) => x.id === t.sponsorId);
+        if (sp && sp.ownerId === profile.id && sp.status === "not_contacted") {
+          setStatus(sp.id, "contacted", profile.id).catch(() => {});
+        }
+      }
       return "ok";
     } catch (e) {
       if (alive.current) setState(t.id, { status: "failed", error: e instanceof Error ? e.message : "Something went wrong." });
@@ -1008,25 +1016,7 @@ function SendStep({ targets, drafts, onBack }: { targets: Target[]; drafts: Reco
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {allSent && (
-          <motion.div
-            role="status"
-            initial={{ opacity: 0, scale: reduce ? 1 : 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3, ease: EASE }}
-            className="flex items-center gap-3 rounded-2xl border border-mint/40 bg-mint/10 p-4"
-          >
-            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-mint text-[#071a33]">
-              <Check className="size-5" />
-            </span>
-            <p className="font-semibold">
-              Sent {sentCount} {sentCount === 1 ? "email" : "emails"}. <span className="font-normal text-muted">Replies go to your inbox.</span>
-            </p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <AnimatePresence>{allSent && <SentCelebration key="celebrate" count={sentCount} />}</AnimatePresence>
 
       {targets.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-line p-8 text-center">

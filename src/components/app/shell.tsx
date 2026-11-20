@@ -3,16 +3,42 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/firebase/auth-context";
-import { motion } from "framer-motion";
-import { BarChart3, Building2, CheckCheck, LogOut, Mail, Sparkles, Trophy } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
+import type { LucideIcon } from "lucide-react";
+import { Inbox, BarChart3, Building2, CheckCheck, LogOut, Mail, Sparkles, Trophy } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { cn } from "@/lib/utils";
+import { Ambient } from "@/components/fx/ambient";
+
+const MotionLink = motion.create(Link);
+
+function NavIcon({ icon: Icon, active, reduce }: { icon: LucideIcon; active: boolean; reduce: boolean }) {
+  return (
+    <span className="relative grid size-[18px] place-items-center">
+      {active && !reduce && (
+        <motion.span
+          aria-hidden
+          className="absolute -inset-1.5 rounded-full bg-sky blur-md"
+          animate={{ opacity: [0.12, 0.45, 0.12], scale: [0.85, 1.25, 0.85] }}
+          transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut" }}
+        />
+      )}
+      <motion.span
+        className="relative grid place-items-center"
+        variants={reduce ? undefined : { hover: { rotate: [0, -14, 12, -6, 0], scale: [1, 1.2, 1.12, 1.05, 1], transition: { duration: 0.3 } } }}
+      >
+        <Icon className={cn("size-[18px]", active && "text-sky")} aria-hidden />
+      </motion.span>
+    </span>
+  );
+}
 
 const MEMBER_NAV = [
   { href: "/app", label: "My sponsors", icon: Building2 },
   { href: "/app/leaderboard", label: "Leaderboard", icon: Trophy },
   { href: "/app/emails", label: "Email composer", icon: Mail },
+  { href: "/app/sent", label: "My emails", icon: Inbox },
 ];
 
 const ADMIN_NAV = [
@@ -29,9 +55,11 @@ export function Shell({ children, variant }: { children: React.ReactNode; varian
   const isAdmin = profile?.role === "admin";
   const name = profile?.name ?? "";
   const nav = variant === "admin" ? ADMIN_NAV : MEMBER_NAV;
+  const reduce = !!useReducedMotion();
 
   return (
-    <div className="min-h-dvh lg:grid lg:grid-cols-[248px_1fr]">
+    <div className="relative min-h-dvh lg:grid lg:grid-cols-[248px_1fr]">
+      <Ambient />
       <aside className="sticky top-0 z-40 flex items-center justify-between border-b border-line bg-raised/90 px-4 py-3 backdrop-blur lg:h-dvh lg:flex-col lg:items-stretch lg:justify-start lg:border-b-0 lg:border-r lg:px-4 lg:py-6">
         <Link href="/app" className="lg:px-2">
           <Logo />
@@ -43,8 +71,9 @@ export function Shell({ children, variant }: { children: React.ReactNode; varian
               const active = pathname === item.href;
               return (
                 <li key={item.href}>
-                  <Link
+                  <MotionLink
                     href={item.href}
+                    whileHover="hover"
                     className={cn(
                       "relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-150",
                       active ? "text-fg" : "text-muted hover:text-fg",
@@ -57,9 +86,9 @@ export function Shell({ children, variant }: { children: React.ReactNode; varian
                         transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
                       />
                     )}
-                    <item.icon className={cn("size-[18px]", active && "text-sky")} aria-hidden />
+                    <NavIcon icon={item.icon} active={active} reduce={reduce} />
                     {item.label}
-                  </Link>
+                  </MotionLink>
                 </li>
               );
             })}
@@ -131,7 +160,7 @@ export function Shell({ children, variant }: { children: React.ReactNode; varian
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-        className="min-w-0 px-4 pb-28 pt-6 sm:px-8 lg:pb-12 lg:pt-10"
+        className="relative z-[1] min-w-0 px-4 pb-28 pt-6 sm:px-8 lg:pb-12 lg:pt-10"
       >
         {children}
       </motion.main>
